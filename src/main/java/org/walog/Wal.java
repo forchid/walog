@@ -24,32 +24,23 @@
 
 package org.walog;
 
-import java.io.File;
-import java.io.IOException;
-
-/**
+/** The write-ahead log.
+ * 
  * @author little-pan
- * @since 2019-12-23
+ * @since 2019-12-22
  *
  */
-public class LoggerFactoryTest extends Test {
+public interface Wal {
 
-    public static void main(String[] args) throws IOException {
-        new LoggerFactoryTest().test();
-    }
+    int LSN_OFFSET_MASK = 0x3fffffff;
 
-    @Override
-    public void test() throws IOException {
-        String dir = "loggerFactory";
-        File dirFile = getDir(dir);
-        
-        Logger logger = LoggerFactory.open(dirFile);
-        logger.clear();
-        logger.close();
-        
-        logger = LoggerFactory.open(dirFile.getAbsolutePath());
-        logger.clear();
-        logger.close();
-    }
+    /** The lowest 30 bits of the lsn is offset in WAL file, and
+     * the highest 34bits is the WAL file index.
+     *
+     * @return the WAL lsn
+     */
+    long getLsn();
+    
+    byte[] getData();
 
 }

@@ -24,31 +24,58 @@
 
 package org.walog.util;
 
+import org.walog.Wal;
+
 import java.io.File;
 import java.io.FileFilter;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import static java.lang.Integer.getInteger;
 
 /**
  * @author little-pan
  * @since 2019-12-22
  *
  */
-public final class LogFileUtils {
+public final class WalFileUtils {
+
+    public static final String EXT = ".wal";
+    public static final int ROLL_SIZE;
+    static {
+        final String name = "org.walog.file.rollSize";
+        int n = getInteger(name, 64 << 20);
+        if (n > Wal.LSN_OFFSET_MASK) {
+            throw new RuntimeException(name+" too big");
+        }
+        final int minSize = 1 << 20;
+        if (n < minSize) {
+            throw new RuntimeException(name+" must bigger than or equal to " + minSize);
+        }
+        ROLL_SIZE = n;
+    }
     
     private static final char[] HEX = {
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+
+    private static final CopyOnWriteArrayList<File> CACHE = new CopyOnWriteArrayList<>();
     
-    private LogFileUtils() {
+    private WalFileUtils() {
         // NOOP
     }
     
     public static long lsn(String filename) {
-        final int len = filename.length();
-        
-        if (len != 16) {
+        int len = filename.length();
+
+        // Check filename
+        if (len != 16 + EXT.length()) {
             throw new IllegalArgumentException("filename length " + len);
         }
+        if (!filename.endsWith(EXT)) {
+            throw new IllegalArgumentException("filename " + filename);
+        }
+        len -= EXT.length();
         
         long lsn = 0;
         for (int i = 0, n = len >> 1; i < n; ) {
@@ -76,27 +103,30 @@ public final class LogFileUtils {
     }
     
     public static String filename(long lsn) {
-        char[] hex = new char[16];
+        final char[] hex = new char[16];
         for (int i = 0, j = 64, n = hex.length; i < n; ) {
             byte k = (byte)(lsn >>> (j -= 8));
             hex[i++] = HEX[(k >> 4) & 0x0f];
             hex[i++] = HEX[(k & 0x0f)];
         }
         
-        return new String(hex);
+        return new String(hex) + EXT;
     }
     
-    public static File[] listFiles(File dir) {
+    public static File[] listFiles(File dir) throws  IllegalStateException  {
         return listFiles(dir, false);
     }
     
-    public static File[] listFiles(File dir, boolean asc) {
-        File[] logFiles = dir.listFiles(new LogFileFilter());
-        Arrays.sort(logFiles, new LogFileSorter(asc));
+    public static File[] listFiles(File dir, boolean asc) throws  IllegalStateException {
+        final File[] logFiles = dir.listFiles(new WalFileFilter());
+        if (logFiles == null) {
+            throw new IllegalStateException("Can't list files");
+        }
+        Arrays.sort(logFiles, new WalFileSorter(asc));
         return logFiles;
     }
     
-    public static File lastFile(File dir) {
+    public static File lastFile(File dir) throws  IllegalStateException  {
         File[] logFiles = listFiles(dir, false);
         if (logFiles.length > 0) {
             return logFiles[0];
@@ -105,7 +135,7 @@ public final class LogFileUtils {
         return null;
     }
     
-    public static File firstFile(File dir) {
+    public static File firstFile(File dir) throws  IllegalStateException {
         File[] logFiles = listFiles(dir, true);
         if (logFiles.length > 0) {
             return logFiles[0];
@@ -113,8 +143,13 @@ public final class LogFileUtils {
         
         return null;
     }
-    
-    static class LogFileFilter implements FileFilter {
+
+    public static File getFile(File dir, long lsn) {
+        final String filename = filename(lsn);
+        return new File(dir, filename);
+    }
+
+    static class WalFileFilter implements FileFilter {
         
         @Override
         public boolean accept(File file) {
@@ -123,7 +158,7 @@ public final class LogFileUtils {
             }
             
             final String name = file.getName();
-            final int length = name.length();
+            final int length = name.length() - EXT.length();
             if (length != 16) {
                 return false;
             }
@@ -140,21 +175,21 @@ public final class LogFileUtils {
         }
     }
     
-    static class LogFileSorter implements Comparator<File> {
+    static class WalFileSorter implements Comparator<File> {
         
         final boolean asc;
         
-        public LogFileSorter() {
+        public WalFileSorter() {
             this(false);
         }
         
-        public LogFileSorter(boolean asc) {
+        public WalFileSorter(boolean asc) {
             this.asc = asc;
         }
 
         @Override
         public int compare(File a, File b) {
-            int i = a.getName().compareTo(b.getName());
+            final int i = a.getName().compareTo(b.getName());
             return (this.asc? i: -i);
         }
         

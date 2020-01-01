@@ -1,4 +1,4 @@
- /**
+/**
  * The MIT License (MIT)
  *
  * Copyright (c) 2019 little-pan
@@ -24,54 +24,49 @@
 
 package org.walog;
 
+import java.io.File;
 import java.io.IOException;
 
-import static java.lang.Integer.*;
-
-/** The WAL manager.
- * 
+/**
  * @author little-pan
- * @since 2019-12-22
+ * @since 2019-12-23
  *
  */
-public interface Logger extends AutoCloseable {
-    
-    static final int APPEND_LOCK_TIMEOUT = getInteger("org.walog.append.lockTimeout", 50000);
-    static final int LOG_ROLL_SIZE = getInteger("org.walog.log.rollSize", 64 << 20);
-    
-    /** Open the logger.
-     * 
-     * @return true if open successfully, or false if acquire append lock timeout or 
-     * interrupted when recovery
-     * @throws java.io.IOException if IO error
-     */
-    boolean open() throws IOException;
-    
-    /**
-     * Append the log payload to the logger.
-     * 
-     * @return the appended log, or null if acquire append lock timeout or interrupted
-     * @throws java.io.IOException if IO error
-     */
-    Log append(byte[] payload) throws IOException;
-    
-    Log next() throws IOException;
-    
-    Log next(long lsn) throws IOException;
-    
-    Log get() throws IOException;
-    
-    Log get(long lsn) throws IOException;
-    
-    long purgeTo(long lsn) throws IOException;
-    
-    boolean clear() throws IOException;
-    
-    boolean sync() throws IOException;
-    
-    boolean isOpen();
-    
+public class WalerFactoryTest extends Test {
+
+    public static void main(String[] args) throws IOException {
+        new WalerFactoryTest().test();
+    }
+
     @Override
-    void close();
-    
+    public void test() throws IOException {
+        final String dir = "walerFactory";
+        final File dirFile = getDir(dir);
+        final String data = "Hello, walog!";
+        
+        Waler waler = WalerFactory.open(dirFile);
+        final long startTime = System.currentTimeMillis();
+        for (int i = 0; i < 2500000; ++i) {
+            waler.append(data.getBytes());
+        }
+        System.out.println("Time: " + (System.currentTimeMillis() - startTime));
+        waler.close();
+
+        waler = WalerFactory.open(dirFile.getAbsolutePath());
+        // Check-1
+        Wal wal = waler.first();
+        String result = new String(wal.getData());
+        if (!data.equals(result)){
+            throw new RuntimeException("Failed");
+        }
+        // Check-2
+        wal = waler.get(wal.getLsn());
+        result = new String(wal.getData());
+        if (!data.equals(result)){
+            throw new RuntimeException("Failed");
+        }
+
+        waler.close();
+    }
+
 }

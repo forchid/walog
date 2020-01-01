@@ -27,22 +27,22 @@ package org.walog;
 import java.io.File;
 import java.io.IOException;
 
-import org.walog.internal.NioLogger;
+import org.walog.internal.NioWaler;
 
 /**
  * @author little-pan
  * @since 2019-12-22
  *
  */
-public class LoggerFactory {
+public class WalerFactory {
     
-    public static Logger open(File dir) throws IOException {
-        final Logger logger = new NioLogger(dir);
+    public static Waler open(File dir) throws IOException {
+        final Waler logger = new NioWaler(dir);
         logger.open();
         return logger;
     }
     
-    public static Logger open(String dir) throws IOException {
+    public static Waler open(String dir) throws IOException {
         return open(new File(dir));
     }
 

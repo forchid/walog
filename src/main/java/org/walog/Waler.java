@@ -1,4 +1,4 @@
-/**
+ /**
  * The MIT License (MIT)
  *
  * Copyright (c) 2019 little-pan
@@ -24,18 +24,52 @@
 
 package org.walog;
 
-/** The write-ahead log.
+import org.walog.util.WalFileUtils;
+
+import java.io.IOException;
+
+import static java.lang.Integer.*;
+
+/** The WAL manager.
  * 
  * @author little-pan
  * @since 2019-12-22
  *
  */
-public interface Log {
+public interface Waler extends AutoCloseable {
     
-    long getLsn();
+    int APPEND_LOCK_TIMEOUT = getInteger("org.walog.append.lockTimeout", 50000);
+    int BLOCK_CACHE_SIZE = getInteger("org.walog.block.cacheSize", 16);
+    int FILE_ROLL_SIZE = WalFileUtils.ROLL_SIZE;
     
-    int getLength();
+    /** Open the logger.
+     * 
+     * @return true if open successfully, otherwise false
+     * @throws java.io.IOException if IO error
+     */
+    boolean open() throws IOException;
     
-    byte[] getPayload();
-
+    /**
+     * Append the log payload to the logger.
+     *
+     * @return true if success, false if acquire append lock timeout
+     * @throws java.io.IOException if IO error
+     */
+    boolean append(byte[] payload) throws IOException;
+    
+    Wal first() throws IOException;
+    
+    Wal get(long lsn) throws IOException;
+    
+    void purgeTo(String walFile) throws IOException;
+    
+    boolean clear() throws IOException;
+    
+    boolean sync() throws IOException;
+    
+    boolean isOpen();
+    
+    @Override
+    void close();
+    
 }
