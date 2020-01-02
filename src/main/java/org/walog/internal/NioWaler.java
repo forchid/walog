@@ -53,7 +53,7 @@ public class NioWaler implements Waler {
     private FileChannel appendLockChan;
     private volatile FileLock appendLock;
 
-    /** Create a logger under the specified directory
+    /** Create a WAL logger under the specified directory
      * 
      * @param dir the logger directory
      */
@@ -91,14 +91,21 @@ public class NioWaler implements Waler {
     }
 
     protected void rollFile() throws IOException {
-        final long lsn = this.appendFile.getLsn() + (Wal.LSN_OFFSET_MASK + 1);
+        final long last = this.appendFile.getLsn();
+        final long lsn = last + (Wal.LSN_OFFSET_MASK + 1);
         if (lsn < 0L) {
             throw new IOException("lsn full");
         }
         IoUtils.close(this.appendFile);
+
+        IoUtils.debug("roll wal file: lsn 0x%x -> 0x%x", last, lsn);
         final String name = WalFileUtils.filename(lsn);
-        final File lastFile = new File(dir, name);
+        final File lastFile = new File(this.dir, name);
         this.appendFile = new NioWalFile(lastFile, BLOCK_CACHE_SIZE);
+        if (this.appendFile.size() != 0L) {
+            throw new IOException(lastFile + " not a empty file");
+        }
+        IoUtils.debug("roll wal file to '%s' in '%s'", name, this.dir);
     }
 
     protected boolean recovery() throws IOException {

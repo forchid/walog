@@ -46,9 +46,9 @@ public class NioWalFile implements  AutoCloseable {
     private volatile boolean open;
 
     public NioWalFile(File file, int blockCacheSize) throws IOException {
-        this.file = file;
-        this.lsn  = WalFileUtils.lsn(file.getName());
-        this.raf = new RandomAccessFile(file, "rw");
+        this.file  = file;
+        this.lsn   = WalFileUtils.lsn(file.getName());
+        this.raf   = new RandomAccessFile(file, "rw");
         this.blockCache = new LruCache<>(blockCacheSize);
 
         boolean failed = true;
@@ -248,20 +248,32 @@ public class NioWalFile implements  AutoCloseable {
             getBytes(p, buf);
             offset = IoUtils.readInt(buf);
             try {
-                get(offset);
+                Wal wal = get(offset);
+                IoUtils.info("walog last lsn 0x%x in '%s'", wal.getLsn(), this.file);
                 this.chan.position(size);
                 return;
             } catch (CorruptedException |EOFException e) {
+                IoUtils.error("walog exit abnormally, recovery ...", e);
                 offset = 0;
             }
         }
         // 2. Otherwise forward
+        SimpleWal wal = null;
         try {
             for (; offset < size; ) {
-                final SimpleWal wal = (SimpleWal)get(offset);
+                wal = (SimpleWal)get(offset);
                 offset += (wal.getHeadSize() + wal.getData().length + 4);
             }
         } catch (final EOFException e) {
+            final String message;
+            if (wal == null) {
+                message = String.format("walog corrupted and recovery from 0x%x in '%s'",
+                        offset, this.file);
+            } else {
+                message = String.format("walog corrupted and recovery from 0x%x in '%s', last lsn 0x%x",
+                        offset, this.file, wal.getLsn());
+            }
+            IoUtils.error(message, e);
             this.chan.truncate(offset);
             this.chan.position(offset);
         }

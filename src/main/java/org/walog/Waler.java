@@ -37,7 +37,7 @@ import static java.lang.Integer.*;
  *
  */
 public interface Waler extends AutoCloseable {
-    
+
     int APPEND_LOCK_TIMEOUT = getInteger("org.walog.append.lockTimeout", 50000);
     int BLOCK_CACHE_SIZE = getInteger("org.walog.block.cacheSize", 16);
     int FILE_ROLL_SIZE = WalFileUtils.ROLL_SIZE;
@@ -52,7 +52,7 @@ public interface Waler extends AutoCloseable {
     /**
      * Append the log payload to the logger.
      *
-     * @return true if success, false if acquire append lock timeout
+     * @return true if success, false if acquire append lock timeout, or interrupted
      * @throws java.io.IOException if IO error
      */
     boolean append(byte[] payload) throws IOException;

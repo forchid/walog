@@ -24,10 +24,12 @@
 
 package org.walog.util;
 
-import java.io.EOFException;
-import java.io.IOException;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 /**
  * @author little-pan
@@ -35,9 +37,37 @@ import java.nio.channels.FileChannel;
  *
  */
 public final class IoUtils {
+
+    static final boolean debug = Boolean.getBoolean("org.walog.debug");
+    static final PrintStream err = newStream("org.walog.errorFile", System.err);
+    static final PrintStream out = newStream("org.walog.debugFile", System.out);
     
     private IoUtils() {
         // NOOP
+    }
+
+    public static PrintStream newStream(String propertyName, PrintStream def) {
+        final PrintStream out;
+        String errorFile = System.getProperty("org.walog.errorFile");
+        if (errorFile == null) {
+            out = def;
+        } else {
+            OutputStream tar = null;
+            boolean failed = true;
+            try {
+                tar = new FileOutputStream(errorFile);
+                out = new PrintStream(tar, true);
+                failed = false;
+            } catch (final IOException e) {
+                throw new RuntimeException("Access file failed", e);
+            } finally {
+                if (failed) {
+                    close(tar);
+                }
+            }
+        }
+
+        return out;
     }
 
     public static int readInt(byte[] buffer) {
@@ -112,6 +142,40 @@ public final class IoUtils {
                 // ignore
             }
         }
+    }
+
+    public static void println(String tag, PrintStream out, String message, Throwable error) {
+        synchronized (out) {
+            println(tag, out, message);
+            error.printStackTrace(out);
+        }
+    }
+
+    public static void println(String tag, PrintStream out, String format, Object... args) {
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+        String thread = Thread.currentThread().getName();
+        if (args.length > 0) {
+            format = String.format(format, args);
+        }
+        out.println(String.format("%s[%s][%s] %s", df.format(new Date()), tag, thread, format));
+    }
+
+    public static void error(String message, Throwable error) {
+        println("ERROR", err, message, error);
+    }
+
+    public static void error(String format, Object ... args) {
+        println("ERROR", err, format, args);
+    }
+
+    public static void debug(String format, Object ... args) {
+        if (debug) {
+            println("DEBUG", out, format, args);
+        }
+    }
+
+    public static void info(String format, Object ... args) {
+        println("INFO ", out, format, args);
     }
 
 }

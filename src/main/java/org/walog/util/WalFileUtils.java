@@ -78,7 +78,8 @@ public final class WalFileUtils {
         len -= EXT.length();
         
         long lsn = 0;
-        for (int i = 0, n = len >> 1; i < n; ) {
+        int i = 0;
+        for (; i < len; ) {
             int a = filename.charAt(i++);
             int b = filename.charAt(i++);
             if (a >= '0' && a <= '9') {

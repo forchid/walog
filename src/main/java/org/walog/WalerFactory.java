@@ -24,8 +24,7 @@
 
 package org.walog;
 
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 
 import org.walog.internal.NioWaler;
 
@@ -37,9 +36,9 @@ import org.walog.internal.NioWaler;
 public class WalerFactory {
     
     public static Waler open(File dir) throws IOException {
-        final Waler logger = new NioWaler(dir);
-        logger.open();
-        return logger;
+        final Waler waler = new NioWaler(dir);
+        waler.open();
+        return waler;
     }
     
     public static Waler open(String dir) throws IOException {
