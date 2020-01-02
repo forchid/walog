@@ -41,12 +41,50 @@ public abstract class Test {
         
     }
     
-    public abstract void test() throws IOException;
+    public void test() throws IOException {
+        try {
+            prepare();
+            doTest();
+        } finally {
+            cleanup();
+        }
+    }
+
+    protected void prepare() {
+        cleanup();
+    }
+
+    protected abstract void doTest() throws IOException;
+
+    protected void cleanup() {}
     
     public static File getDir(String dir) {
         File file = new File(testDir, dir);
-        file.mkdirs();
+        if (!file.isDirectory() && !file.mkdirs()) {
+            throw new IllegalStateException("Can't create dir: " + file);
+        }
+
         return file;
+    }
+
+    public static void deleteDir(String dir) {
+        deleteDir(testDir, dir);
+    }
+
+    public static void deleteDir(final File parent, String dir) {
+        final File dirFile = new File(parent, dir);
+        if (dirFile.isDirectory()) {
+            for (final File f: dirFile.listFiles()) {
+                if (f.isDirectory()) {
+                    deleteDir(dirFile, f.getName());
+                } else if (f.isFile() && !f.delete()){
+                    throw new IllegalStateException("Can't delete file: " + f);
+                }
+            }
+            if (!dirFile.delete()) {
+                throw new IllegalStateException("Can't delete directory: " + dirFile);
+            }
+        }
     }
 
 }

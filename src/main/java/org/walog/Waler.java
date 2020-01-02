@@ -27,6 +27,7 @@ package org.walog;
 import org.walog.util.WalFileUtils;
 
 import java.io.IOException;
+import java.util.Iterator;
 
 import static java.lang.Integer.*;
 
@@ -60,6 +61,8 @@ public interface Waler extends AutoCloseable {
     Wal first() throws IOException;
     
     Wal get(long lsn) throws IOException;
+
+    Iterator<Wal> iterator(long lsn);
     
     void purgeTo(String walFile) throws IOException;
     

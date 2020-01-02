@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.util.Iterator;
 
 import org.walog.Wal;
 import org.walog.Waler;
@@ -45,7 +46,8 @@ public class NioWaler implements Waler {
 
     private volatile boolean open;
     protected final File dir;
-    protected final LruCache<File, NioWalFile> walCache;
+    // file lsn -> wal file
+    protected final LruCache<Long, NioWalFile> walCache;
 
     private NioWalFile appendFile;
     
@@ -92,7 +94,7 @@ public class NioWaler implements Waler {
 
     protected void rollFile() throws IOException {
         final long last = this.appendFile.getLsn();
-        final long lsn = last + (Wal.LSN_OFFSET_MASK + 1);
+        final long lsn = WalFileUtils.nextFileLsn(last);
         if (lsn < 0L) {
             throw new IOException("lsn full");
         }
@@ -103,7 +105,7 @@ public class NioWaler implements Waler {
         final File lastFile = new File(this.dir, name);
         this.appendFile = new NioWalFile(lastFile, BLOCK_CACHE_SIZE);
         if (this.appendFile.size() != 0L) {
-            throw new IOException(lastFile + " not a empty file");
+            throw new IllegalStateException(lastFile + " not a empty file");
         }
         IoUtils.debug("roll wal file to '%s' in '%s'", name, this.dir);
     }
@@ -119,7 +121,7 @@ public class NioWaler implements Waler {
             }
 
             if (this.appendLockFile == null) {
-                File lockFile = new File(this.dir, "append.lock");
+                File lockFile = new File(this.dir, ".append.lock");
                 this.appendLockFile = new RandomAccessFile(lockFile, "rw");
                 boolean failed = true;
                 try {
@@ -210,37 +212,55 @@ public class NioWaler implements Waler {
             return null;
         }
 
-        int offset = (int)(lsn & Wal.LSN_OFFSET_MASK);
+        final int offset = WalFileUtils.fileOffset(lsn);
         return walFile.get(offset);
+    }
+
+    @Override
+    public Iterator<Wal> iterator(long lsn) {
+        return new NioWalIterator(this, lsn);
     }
 
     protected NioWalFile getFirstWalFile() throws IOException {
         final File file = WalFileUtils.firstFile(this.dir);
-        return getWalFile(file);
-    }
-
-    protected NioWalFile getWalFile(File file) throws IOException {
-        NioWalFile walFile = this.walCache.get(file);
-        if (walFile == null) {
-            synchronized (this.walCache) {
-                walFile = this.walCache.get(file);
-                if (walFile == null) {
-                    walFile = new NioWalFile(file, BLOCK_CACHE_SIZE);
-                    this.walCache.put(file, walFile);
-                }
-            }
+        if (file == null) {
+            return null;
         }
 
-        return walFile;
+        return getWalFile(WalFileUtils.lsn(file.getName()));
     }
 
+    /** Acquire the specified lsn wal file.
+     *
+     * @param lsn wal serial number
+     * @return the wal file, or null if the file not exits
+     * @throws IOException if IO error
+     */
     protected NioWalFile getWalFile(final long lsn) throws IOException {
         if (lsn < 0L) {
             throw new IllegalArgumentException("lsn must bigger than or equals 0");
         }
 
-        final File file = WalFileUtils.getFile(this.dir, lsn);
-        return getWalFile(file);
+        NioWalFile walFile = this.walCache.get(lsn);
+        if (walFile != null) {
+            return walFile;
+        }
+
+        synchronized (this.walCache) {
+            walFile = this.walCache.get(lsn);
+            if (walFile != null) {
+                return walFile;
+            }
+
+            File file = new File(this.dir, WalFileUtils.filename(lsn));
+            if (!file.isFile()) {
+                return null;
+            }
+            walFile = new NioWalFile(file, BLOCK_CACHE_SIZE);
+            this.walCache.put(lsn, walFile);
+        }
+
+        return walFile;
     }
 
     @Override

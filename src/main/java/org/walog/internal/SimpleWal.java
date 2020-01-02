@@ -25,6 +25,7 @@
 package org.walog.internal;
 
 import org.walog.Wal;
+import org.walog.util.WalFileUtils;
 
 public class SimpleWal implements Wal {
 
@@ -47,6 +48,20 @@ public class SimpleWal implements Wal {
         } else {
             return 4;
         }
+    }
+
+    public int getOffset() {
+        return WalFileUtils.fileOffset(this.lsn);
+    }
+
+    public long nextLsn() {
+        final int offset = getOffset();
+        final int nextOffset = offset + getHeadSize() + getData().length + 8;
+        if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK) {
+            throw new IllegalStateException("offset full");
+        }
+
+        return (WalFileUtils.fileLsn(this.lsn) + nextOffset);
     }
 
     @Override

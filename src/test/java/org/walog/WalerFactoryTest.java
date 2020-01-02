@@ -24,8 +24,11 @@
 
 package org.walog;
 
+import org.walog.util.IoUtils;
+
 import java.io.File;
 import java.io.IOException;
+import java.util.Iterator;
 
 /**
  * @author little-pan
@@ -34,22 +37,34 @@ import java.io.IOException;
  */
 public class WalerFactoryTest extends Test {
 
+    protected static final String dir = "walerFactory";
+
     public static void main(String[] args) throws IOException {
         new WalerFactoryTest().test();
     }
 
     @Override
-    public void test() throws IOException {
-        final String dir = "walerFactory";
+    protected void cleanup() {
+        deleteDir(dir);
+    }
+
+    @Override
+    protected void doTest() throws IOException {
         final File dirFile = getDir(dir);
         final String data = "Hello, walog!";
+        // 10 million:
+        // 2020-01-02 Append 35758ms, iterate 9353ms
+        final int n = 10_000_000;
         
         Waler waler = WalerFactory.open(dirFile);
-        final long startTime = System.currentTimeMillis();
-        for (int i = 0; i < 2500000; ++i) {
-            waler.append(data.getBytes());
+        long startTime = System.currentTimeMillis();
+        for (int i = 0; i < n; ++i) {
+            if (!waler.append(data.getBytes())) {
+                throw new RuntimeException("append wal failed");
+            }
         }
-        System.out.println("Time: " + (System.currentTimeMillis() - startTime));
+        long endTime = System.currentTimeMillis();
+        IoUtils.info("Append %d items, time %dms", n, (endTime - startTime));
         waler.close();
 
         waler = WalerFactory.open(dirFile.getAbsolutePath());
@@ -57,14 +72,32 @@ public class WalerFactoryTest extends Test {
         Wal wal = waler.first();
         String result = new String(wal.getData());
         if (!data.equals(result)){
-            throw new RuntimeException("Failed");
+            throw new RuntimeException("Data corrupted");
         }
         // Check-2
         wal = waler.get(wal.getLsn());
         result = new String(wal.getData());
         if (!data.equals(result)){
-            throw new RuntimeException("Failed");
+            throw new RuntimeException("Data corrupted");
         }
+        // Check-3
+        Iterator<Wal> itr = waler.iterator(0);
+        startTime = System.currentTimeMillis();
+        for (int i = 0; i < n; ++i) {
+            if(!itr.hasNext()) {
+                throw new RuntimeException("Data lost");
+            }
+            wal = itr.next();
+            result = new String(wal.getData());
+            if (!data.equals(result)){
+                throw new RuntimeException("Data corrupted");
+            }
+        }
+        if (itr.hasNext()) {
+            throw new RuntimeException("Data too many");
+        }
+        endTime = System.currentTimeMillis();
+        IoUtils.info("Iterate %d items, time %dms", n, (endTime - startTime));
 
         waler.close();
     }

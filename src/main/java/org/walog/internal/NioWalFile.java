@@ -24,7 +24,7 @@
 
 package org.walog.internal;
 
-import org.walog.CorruptedException;
+import org.walog.CorruptWalException;
 import org.walog.Wal;
 import org.walog.util.IoUtils;
 import org.walog.util.LruCache;
@@ -127,7 +127,24 @@ public class NioWalFile implements  AutoCloseable {
         }
     }
 
-    public Wal get(final int offset) throws IOException {
+    public SimpleWal get(final long lsn) throws IOException {
+        if (this.lsn != WalFileUtils.fileLsn(lsn)) {
+            throw new IllegalArgumentException("lsn not in this file: " + lsn);
+        }
+        return get(WalFileUtils.fileOffset(lsn));
+    }
+
+    /** Query specified offset wal.
+     *
+     * @param offset the wal offset in this file
+     * @return wal, or null if offset bigger than or equals to size of this file
+     * @throws IOException if IO error
+     */
+    public SimpleWal get(final int offset) throws IOException {
+        if (offset >= size()) {
+            return null;
+        }
+
         // wal format: Length(var-int), Data, Offset(int), Data checksum(int)
         int length, i = 0;
         final int p = getByte(offset + i++) & 0xff;
@@ -142,7 +159,7 @@ public class NioWalFile implements  AutoCloseable {
             length |= (getByte(offset + i++) & 0xff) << 16;
         } else {
             final String message = "Illegal prefix of wal length: " + Integer.toHexString(p);
-            throw new CorruptedException(message, this.file.getAbsolutePath(), offset);
+            throw new CorruptWalException(message, this.file.getAbsolutePath(), offset);
         }
 
         final byte[] data = new byte[length];
@@ -154,14 +171,14 @@ public class NioWalFile implements  AutoCloseable {
         i += ia.length;
         final int offsetStored = IoUtils.readInt(ia);
         if (offsetStored != offset) {
-            throw new CorruptedException("Offset not matched", this.file.getAbsolutePath(), offset);
+            throw new CorruptWalException("Offset not matched", this.file.getAbsolutePath(), offset);
         }
 
         getBytes(offset + i, ia);
         i += ia.length;
         final int checksum = IoUtils.readInt(ia);
         if (checksum != IoUtils.getFletcher32(data)) {
-            throw new CorruptedException("Checksum error", this.file.getAbsolutePath(), offset);
+            throw new CorruptWalException("Checksum error", this.file.getAbsolutePath(), offset);
         }
 
         return new SimpleWal(this.lsn | offset, (byte)p, data);
@@ -252,7 +269,7 @@ public class NioWalFile implements  AutoCloseable {
                 IoUtils.info("walog last lsn 0x%x in '%s'", wal.getLsn(), this.file);
                 this.chan.position(size);
                 return;
-            } catch (CorruptedException |EOFException e) {
+            } catch (CorruptWalException |EOFException e) {
                 IoUtils.error("walog exit abnormally, recovery ...", e);
                 offset = 0;
             }

@@ -24,16 +24,27 @@
 
 package org.walog;
 
-public class CorruptedException extends RuntimeException {
+public class CorruptWalException extends RuntimeException {
 
     protected final String file;
     protected final int offset;
 
-    public CorruptedException(String message, String file, int offset) {
+    public CorruptWalException(String message, String file, int offset) {
         super(message);
 
         this.file = file;
         this.offset = offset;
+    }
+
+    @Override
+    public String getMessage() {
+        String base = super.getMessage();
+        return String.format("%s: offset 0x%x in '%s'", base, getOffset(), getFile());
+    }
+
+    @Override
+    public String toString() {
+        return getMessage();
     }
 
     public String getFile() {

@@ -64,6 +64,18 @@ public final class WalFileUtils {
     private WalFileUtils() {
         // NOOP
     }
+
+    public static int fileOffset(long lsn) {
+        return (int)(lsn & Wal.LSN_OFFSET_MASK);
+    }
+
+    public static long fileLsn(long lsn) {
+        return (lsn & ~Wal.LSN_OFFSET_MASK);
+    }
+
+    public static long nextFileLsn(long lsn) {
+        return fileLsn(lsn) + (Wal.LSN_OFFSET_MASK + 1L);
+    }
     
     public static long lsn(String filename) {
         int len = filename.length();
@@ -105,8 +117,9 @@ public final class WalFileUtils {
     
     public static String filename(long lsn) {
         final char[] hex = new char[16];
+        final long fileLsn = fileLsn(lsn);
         for (int i = 0, j = 64, n = hex.length; i < n; ) {
-            byte k = (byte)(lsn >>> (j -= 8));
+            byte k = (byte)(fileLsn >>> (j -= 8));
             hex[i++] = HEX[(k >> 4) & 0x0f];
             hex[i++] = HEX[(k & 0x0f)];
         }
