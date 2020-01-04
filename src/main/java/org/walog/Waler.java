@@ -68,6 +68,8 @@ public interface Waler extends AutoCloseable {
     
     void purgeTo(String walFile) throws IOException;
 
+    void purgeTo(long fileLsn) throws IOException;
+
     void clear() throws IOException;
 
     void sync() throws IOException;

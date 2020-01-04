@@ -200,6 +200,11 @@ public class NioWaler implements Waler {
     }
 
     @Override
+    public void purgeTo(long fileLsn) throws IOException {
+        purgeTo(WalFileUtils.filename(fileLsn));
+    }
+
+    @Override
     public void clear() throws IOException {
         final AppendItem<Object> item;
         ensureOpen();
