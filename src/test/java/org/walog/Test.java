@@ -87,4 +87,20 @@ public abstract class Test {
         }
     }
 
+    protected static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            // Ignore
+        }
+    }
+
+    protected static void join(Thread t) {
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            // Ignore
+        }
+    }
+
 }

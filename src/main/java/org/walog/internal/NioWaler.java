@@ -230,8 +230,15 @@ public class NioWaler implements Waler {
 
     @Override
     public void close() {
+        if (!isOpen()) {
+            return;
+        }
+
         IoUtils.close(this.walCache);
-        IoUtils.close(this.appender);
+        synchronized (this.appenderInitLock) {
+            IoUtils.close(this.appender);
+            this.appender = null;
+        }
         this.open = false;
     }
 
