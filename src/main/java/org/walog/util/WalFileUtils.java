@@ -43,17 +43,47 @@ public final class WalFileUtils {
 
     public static final String EXT = ".wal";
     public static final int ROLL_SIZE;
+    public static final int CACHE_SIZE;
+    public static final int BUFFER_SIZE;
+
     static {
-        final String name = "org.walog.file.rollSize";
-        int n = getInteger(name, 64 << 20);
-        if (n > Wal.LSN_OFFSET_MASK) {
-            throw new RuntimeException(name+" too big");
+        // rollSize
+        {
+            final String name = "org.walog.file.rollSize";
+            final long n = UnitUtils.parseBytes(System.getProperty(name, "64m"));
+            if (n > Wal.LSN_OFFSET_MASK) {
+                throw new RuntimeException(name+" too big");
+            }
+            final int m = 1, minSize = m << 20;
+            if (n < minSize) {
+                throw new RuntimeException(name+" must bigger than or equal to " + m + "m");
+            }
+            ROLL_SIZE = (int)n;
         }
-        final int minSize = 1 << 20;
-        if (n < minSize) {
-            throw new RuntimeException(name+" must bigger than or equal to " + minSize);
+
+        // cacheSize
+        {
+            final String name = "org.walog.file.cacheSize";
+            final int n = getInteger(name, 16);
+            if (n < 1) {
+                throw new RuntimeException(name+" must bigger than 0");
+            }
+            CACHE_SIZE = n;
         }
-        ROLL_SIZE = n;
+
+        // bufferSize
+        {
+            final String name = "org.walog.file.bufferSize";
+            final long n = UnitUtils.parseBytes(System.getProperty(name, "4m"));
+            if (n > Wal.LSN_OFFSET_MASK) {
+                throw new RuntimeException(name+" too big");
+            }
+            final int k = 4, minSize = k << 10;
+            if (n < minSize) {
+                throw new RuntimeException(name+" must bigger than or equal to " + k + "k");
+            }
+            BUFFER_SIZE = (int)n;
+        }
     }
     
     private static final char[] HEX = {

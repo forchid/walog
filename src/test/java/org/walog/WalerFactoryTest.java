@@ -25,6 +25,7 @@
 package org.walog;
 
 import org.walog.util.IoUtils;
+import org.walog.util.WalFileUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -53,39 +54,69 @@ public class WalerFactoryTest extends Test {
         final File dirFile = getDir(dir);
         final String data = "Hello, walog!";
         // 10 million:
-        // 2020-01-02 Append 35758ms, iterate 9353ms
-        final int n = 10_000_000;
+        // 2020-01-02 Direct append: 1 thread append 35758ms, iterate 9353ms
+        // 2020-01-04 Background append: 1 thread 135522ms, iterate 8701ms
+        // 2020-01-04 Background append: 10 threads 39339ms, iterate 8713ms
+        // 2020-01-04 Background append: 200 threads 36877ms, iterate 9007ms
+        // 2020-01-04 Background append: 250 threads 38148ms, iterate 8686ms
+        final int n = 10_000_000, c = 10, step = n / c;
         
-        Waler waler = WalerFactory.open(dirFile);
+        final Waler walera = WalerFactory.open(dirFile);
         long startTime = System.currentTimeMillis();
-        for (int i = 0; i < n; ++i) {
-            if (!waler.append(data.getBytes())) {
-                throw new RuntimeException("append wal failed");
+        final Thread[] workers = new Thread[c];
+        for (int i = 0, m = 0; i < c; ++i) {
+            final int s = m + step, e = s + step;
+            m = e;
+            final Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        for (int i = s; i < e; ++i) {
+                            if (walera.append(data.getBytes()) == null) {
+                                throw new RuntimeException("append wal failed");
+                            }
+                            if (i % 10000 == 0) {
+                                walera.sync();
+                            }
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }, "worker-"+i);
+            t.start();
+            workers[i] = t;
+        }
+        for (final Thread t: workers) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                // Ignore
             }
         }
         long endTime = System.currentTimeMillis();
         IoUtils.info("Append %d items, time %dms", n, (endTime - startTime));
-        waler.close();
+        walera.close();
 
-        waler = WalerFactory.open(dirFile.getAbsolutePath());
+        final Waler walerb = WalerFactory.open(dirFile.getAbsolutePath());
         // Check-1
-        Wal wal = waler.first();
+        Wal wal = walerb.first();
         String result = new String(wal.getData());
         if (!data.equals(result)){
             throw new RuntimeException("Data corrupted");
         }
         // Check-2
-        wal = waler.get(wal.getLsn());
+        wal = walerb.get(wal.getLsn());
         result = new String(wal.getData());
         if (!data.equals(result)){
             throw new RuntimeException("Data corrupted");
         }
         // Check-3
-        Iterator<Wal> itr = waler.iterator(0);
+        Iterator<Wal> itr = walerb.iterator(wal.getLsn());
         startTime = System.currentTimeMillis();
         for (int i = 0; i < n; ++i) {
             if(!itr.hasNext()) {
-                throw new RuntimeException("Data lost");
+                throw new RuntimeException("Data lost at i " + i);
             }
             wal = itr.next();
             result = new String(wal.getData());
@@ -99,7 +130,14 @@ public class WalerFactoryTest extends Test {
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate %d items, time %dms", n, (endTime - startTime));
 
-        waler.close();
+        final File lastFile = WalFileUtils.lastFile(dirFile);
+        if (lastFile == null) {
+            throw new RuntimeException("Last wal file lost");
+        }
+        walerb.purgeTo(lastFile.getName());
+        walerb.clear();
+
+        walerb.close();
     }
 
 }

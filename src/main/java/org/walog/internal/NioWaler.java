@@ -26,9 +26,6 @@ package org.walog.internal;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
 import java.util.Iterator;
 
 import org.walog.Wal;
@@ -45,15 +42,12 @@ import org.walog.util.WalFileUtils;
 public class NioWaler implements Waler {
 
     private volatile boolean open;
+
     protected final File dir;
     // file lsn -> wal file
     protected final LruCache<Long, NioWalFile> walCache;
-
-    private NioWalFile appendFile;
-    
-    private RandomAccessFile appendLockFile;
-    private FileChannel appendLockChan;
-    private volatile FileLock appendLock;
+    private final Object appenderInitLock = new Object();
+    private volatile NioAppender appender;
 
     /** Create a WAL logger under the specified directory
      * 
@@ -61,135 +55,65 @@ public class NioWaler implements Waler {
      */
     public NioWaler(File dir) {
         this.dir = dir;
-        this.walCache = new LruCache<>();
+        this.walCache = new LruCache<>(WalFileUtils.CACHE_SIZE);
     }
     
     @Override
-    public boolean open() throws IOException {
+    public void open() throws IOException {
         if (isOpen()) {
-            return true;
+            return;
         }
         
         final File dir = this.dir;
         if (!dir.isDirectory() && !dir.mkdir()) {
             throw new IOException("Can't create walog directory: " + dir);
         }
+        this.open = true;
+    }
 
-        return true;
+    protected File getDirectory() {
+        return this.dir;
+    }
+
+    protected File newFile(String filename) {
+        return new File(this.dir, filename);
     }
     
     @Override
-    public boolean append(byte[] payload) throws IOException {
-        if (!recovery()) {
-            return false;
-        }
-
-        synchronized (this) {
-            if (this.appendFile.size() >= FILE_ROLL_SIZE) {
-                rollFile();
-            }
-        }
-        return this.appendFile.append(payload);
+    public Wal append(byte[] payload) throws IOException {
+        ensureOpen();
+        final NioAppender appender = getAppender();
+        final AppendPayloadItem item = new AppendPayloadItem(appender, payload);
+        return appender.append(item);
     }
 
-    protected void rollFile() throws IOException {
-        final long last = this.appendFile.getLsn();
-        final long lsn = WalFileUtils.nextFileLsn(last);
-        if (lsn < 0L) {
-            throw new IOException("lsn full");
-        }
-        IoUtils.close(this.appendFile);
-
-        IoUtils.debug("roll wal file: lsn 0x%x -> 0x%x", last, lsn);
-        final String name = WalFileUtils.filename(lsn);
-        final File lastFile = new File(this.dir, name);
-        this.appendFile = new NioWalFile(lastFile, BLOCK_CACHE_SIZE);
-        if (this.appendFile.size() != 0L) {
-            throw new IllegalStateException(lastFile + " not a empty file");
-        }
-        IoUtils.debug("roll wal file to '%s' in '%s'", name, this.dir);
-    }
-
-    protected boolean recovery() throws IOException {
-        if (this.appendLock != null && this.appendLock.isValid()) {
-            return true;
-        }
-
-        synchronized(this) {
-            if (this.appendLock != null && this.appendLock.isValid()) {
-                return true;
-            }
-
-            if (this.appendLockFile == null) {
-                File lockFile = new File(this.dir, ".append.lock");
-                this.appendLockFile = new RandomAccessFile(lockFile, "rw");
-                boolean failed = true;
-                try {
-                    this.appendLockChan = this.appendLockFile.getChannel();
-                    failed = false;
-                } finally {
-                    if (failed) {
-                        IoUtils.close(this.appendLockFile);
+    protected NioAppender getAppender() {
+        final NioAppender appender = this.appender;
+        if (appender == null) {
+            synchronized (this.appenderInitLock) {
+                if (this.appender == null) {
+                    this.appender = new NioAppender(this);
+                    boolean failed = true;
+                    try {
+                        this.appender.start();
+                        failed = false;
+                    } finally {
+                        if(failed) {
+                            this.appender = null;
+                        }
                     }
                 }
-            }
-
-            final FileLock appendLock = appendLock();
-            final File dir = this.dir;
-            boolean failed = true;
-            try {
-                File lastFile = WalFileUtils.lastFile(dir);
-                if (lastFile == null) {
-                    String name = WalFileUtils.filename(0L);
-                    lastFile = new File(dir, name);
-                }
-                this.appendFile = new NioWalFile(lastFile, BLOCK_CACHE_SIZE);
-                this.appendFile.recovery();
-                this.appendLock = appendLock;
-                failed = false;
-                return true;
-            } finally {
-                if (failed) {
-                    IoUtils.close(appendLock);
-                    IoUtils.close(this.appendFile);
-                    this.appendLock = null;
-                    this.appendFile = null;
-                }
-            }
-        }
-    }
-
-    protected FileLock appendLock() throws IOException {
-        final int lockTimeout = APPEND_LOCK_TIMEOUT;
-        if (lockTimeout <= 0) {
-            for (;;) {
-                final FileLock lock = this.appendLockChan.lock();
-                if (lock != null) {
-                    return lock;
-                }
+                return this.appender;
             }
         }
 
-        final long deadline = System.currentTimeMillis() + lockTimeout;
-        try {
-            for (;;) {
-                final FileLock lock = this.appendLockChan.tryLock();
-                if (lock != null) {
-                    return lock;
-                }
-
-                Thread.sleep(10L);
-                if (System.currentTimeMillis() > deadline) {
-                    return null;
-                }
-            }
-        } catch (InterruptedException e) {
-            return null;
-        }
+        return appender;
     }
 
     @Override
     public Wal first() throws IOException {
+        ensureOpen();
+
         final NioWalFile walFile = getFirstWalFile();
         if (walFile == null) {
             return null;
@@ -200,6 +124,8 @@ public class NioWaler implements Waler {
 
     @Override
     public Wal get(final long lsn) throws IOException {
+        ensureOpen();
+
         // WAl lookup basic algorithm:
         // 1) Find the log living in which wal file
         // 2) Skip to the offset in file, then read it
@@ -256,7 +182,7 @@ public class NioWaler implements Waler {
             if (!file.isFile()) {
                 return null;
             }
-            walFile = new NioWalFile(file, BLOCK_CACHE_SIZE);
+            walFile = new NioWalFile(file);
             this.walCache.put(lsn, walFile);
         }
 
@@ -265,19 +191,36 @@ public class NioWaler implements Waler {
 
     @Override
     public void purgeTo(String walFile) throws IOException {
-        // TODO Auto-generated method stub
+        final AppendPurgeToItem item;
+        ensureOpen();
+
+        final NioAppender appender = getAppender();
+        item = new AppendPurgeToItem(appender, walFile);
+        appender.append(item);
     }
 
     @Override
-    public boolean clear() throws IOException {
-        // TODO Auto-generated method stub
-        return false;
+    public void clear() throws IOException {
+        final AppendItem<Object> item;
+        ensureOpen();
+
+        final NioAppender appender = getAppender();
+        item = new AppendItem<>(AppendItem.TAG_CLEAR, appender);
+        appender.append(item);
     }
 
     @Override
-    public boolean sync() throws IOException {
-        // TODO Auto-generated method stub
-        return false;
+    public void sync() throws IOException {
+        final AppendItem<Object> item;
+        ensureOpen();
+
+        final NioAppender appender = getAppender();
+        item = new AppendItem<>(AppendItem.TAG_SYNC, appender);
+        appender.append(item);
+    }
+
+    protected void ensureOpen() throws IOException {
+        if (!isOpen()) throw new IOException("waler closed");
     }
 
     @Override
@@ -288,10 +231,7 @@ public class NioWaler implements Waler {
     @Override
     public void close() {
         IoUtils.close(this.walCache);
-        IoUtils.close(this.appendFile);
-        
-        IoUtils.close(this.appendLockChan);
-        IoUtils.close(this.appendLockFile);
+        IoUtils.close(this.appender);
         this.open = false;
     }
 

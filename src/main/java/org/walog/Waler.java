@@ -24,12 +24,8 @@
 
 package org.walog;
 
-import org.walog.util.WalFileUtils;
-
 import java.io.IOException;
 import java.util.Iterator;
-
-import static java.lang.Integer.*;
 
 /** The WAL manager.
  * 
@@ -38,37 +34,43 @@ import static java.lang.Integer.*;
  *
  */
 public interface Waler extends AutoCloseable {
-
-    int APPEND_LOCK_TIMEOUT = getInteger("org.walog.append.lockTimeout", 50000);
-    int BLOCK_CACHE_SIZE = getInteger("org.walog.block.cacheSize", 16);
-    int FILE_ROLL_SIZE = WalFileUtils.ROLL_SIZE;
     
     /** Open the logger.
-     * 
-     * @return true if open successfully, otherwise false
+     *
      * @throws java.io.IOException if IO error
      */
-    boolean open() throws IOException;
+    void open() throws IOException;
     
     /**
      * Append the log payload to the logger.
      *
-     * @return true if success, false if acquire append lock timeout, or interrupted
+     * @return appended log if success, null if appending timeout, or interrupted
      * @throws java.io.IOException if IO error
      */
-    boolean append(byte[] payload) throws IOException;
-    
+    Wal append(byte[] payload) throws IOException;
+
+    /** Get current first log in this wal logger.
+     *
+     * @return the first log, or null if no any log
+     * @throws IOException if IO error
+     */
     Wal first() throws IOException;
-    
+
+    /** Get the log of the specified lsn.
+     *
+     * @param lsn target log LSN
+     * @return the specified log, or null if not found
+     * @throws IOException if IO error
+     */
     Wal get(long lsn) throws IOException;
 
     Iterator<Wal> iterator(long lsn);
     
     void purgeTo(String walFile) throws IOException;
-    
-    boolean clear() throws IOException;
-    
-    boolean sync() throws IOException;
+
+    void clear() throws IOException;
+
+    void sync() throws IOException;
     
     boolean isOpen();
     
