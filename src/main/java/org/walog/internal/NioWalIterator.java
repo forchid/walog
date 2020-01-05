@@ -25,10 +25,15 @@
 package org.walog.internal;
 
 import org.walog.Wal;
+import org.walog.util.IoUtils;
 import org.walog.util.WalFileUtils;
+import static org.walog.util.WalFileUtils.*;
 
+import java.io.EOFException;
+import java.io.File;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 
 class NioWalIterator implements Iterator<Wal> {
 
@@ -37,6 +42,7 @@ class NioWalIterator implements Iterator<Wal> {
     protected NioWalFile walFile;
     protected SimpleWal wal;
     private boolean hasNextCalled;
+    private boolean noNext;
 
     public NioWalIterator(NioWaler waler, long lsn) {
         this.waler = waler;
@@ -46,6 +52,10 @@ class NioWalIterator implements Iterator<Wal> {
     @Override
     public boolean hasNext() {
         this.hasNextCalled = true;
+        if (this.noNext) {
+            return false;
+        }
+
         if (this.wal != null) {
             return true;
         }
@@ -54,6 +64,7 @@ class NioWalIterator implements Iterator<Wal> {
                 // Open wal file
                 this.walFile = this.waler.getWalFile(this.lsn);
                 if (this.walFile == null) {
+                    this.noNext = true;
                     return false;
                 }
             }
@@ -64,6 +75,7 @@ class NioWalIterator implements Iterator<Wal> {
                 this.lsn = WalFileUtils.nextFileLsn(this.lsn);
                 this.walFile = this.waler.getWalFile(this.lsn);
                 if (this.walFile == null) {
+                    this.noNext = true;
                     return false;
                 }
                 this.wal = walFile.get(this.lsn);
@@ -73,8 +85,20 @@ class NioWalIterator implements Iterator<Wal> {
                 this.lsn = this.wal.nextLsn();
                 return true;
             }
+
+            this.noNext = true;
             return false;
-        } catch (IOException e) {
+        } catch (final IOException e) {
+            if (e instanceof EOFException) {
+                final File dir = this.waler.getDirectory();
+                final String filename = this.walFile.getFilename();
+                final long lastLsn = lastFileLsn(dir, filename);
+                if (this.walFile.getLsn() == lastLsn) {
+                    IoUtils.debug("Reach to the end of file '%s' in '%s'", filename, dir);
+                    this.noNext = true;
+                    return false;
+                }
+            }
             throw new IllegalStateException(e);
         }
     }
@@ -84,8 +108,11 @@ class NioWalIterator implements Iterator<Wal> {
         if (!this.hasNextCalled) {
             throw new IllegalStateException("haxNext() not called");
         }
+        this.hasNextCalled = false;
+        if (this.noNext) {
+            throw new NoSuchElementException();
+        }
 
-        this.hasNextCalled  = false;
         final SimpleWal res = this.wal;
         this.wal = null;
         return res;

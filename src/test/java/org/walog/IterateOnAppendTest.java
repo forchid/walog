@@ -25,6 +25,7 @@
 package org.walog;
 
 import org.walog.util.IoUtils;
+import org.walog.util.Proc;
 import org.walog.util.Task;
 
 import java.io.File;
@@ -36,7 +37,7 @@ import java.util.concurrent.Callable;
 public class IterateOnAppendTest extends Test {
 
     public static void main(String[] args) {
-        for (int i = 0; i < iterates; ++i)
+        for (int i = 0; i < iterates * 10; ++i)
             new IterateOnAppendTest(i).test();
     }
 
@@ -46,9 +47,16 @@ public class IterateOnAppendTest extends Test {
 
     @Override
     protected void doTest() throws IOException {
+        int appendItems = 100000;
+
+        oneWaler(appendItems);
+        twoWalers(appendItems);
+        twoProcs(appendItems);
+    }
+
+    protected void oneWaler(final int appendItems) throws IOException {
         final File dir = getDir();
         final Waler waler = WalerFactory.open(dir);
-        final int appendItems = 100000;
 
         Task<Void> appender = newTask(new Callable<Void>() {
             @Override
@@ -72,10 +80,10 @@ public class IterateOnAppendTest extends Test {
                 Iterator<Wal> itr = waler.iterator(lsn);
                 for (int i = 0; i < n; ++i) {
                     for (; !itr.hasNext();) {
-                        IoUtils.debug("wait appender at i %d", i);
+                        //IoUtils.debug("wait appender at i %d", i);
                         sleep(rand.nextInt(100));
 
-                        IoUtils.debug("re-iterate at i %d", i);
+                        //IoUtils.debug("re-iterate at i %d", i);
                         itr = waler.iterator(lsn);
                         // Skip last item
                         if(once && itr.hasNext()) itr.next();
@@ -107,6 +115,114 @@ public class IterateOnAppendTest extends Test {
         appender.check();
 
         waler.close();
+        cleanup();
+    }
+
+    protected void twoWalers(final int appendItems) throws IOException {
+        final File dir = getDir();
+        final Waler walerA = WalerFactory.open(dir);
+        final Waler walerI = WalerFactory.open(dir);
+
+        Task<Void> appender = newTask(new Callable<Void>() {
+            @Override
+            public Void call() throws IOException {
+                int n = appendItems;
+                for(int i = 0; i < n; ++i) {
+                    walerA.append(System.currentTimeMillis()+": i=" + i);
+                }
+                IoUtils.debug("complete");
+                return null;
+            }
+        }, "appender");
+
+        Task<Void> iterator = newTask(new Callable<Void>() {
+            @Override
+            public Void call() {
+                long lsn = 0;
+                boolean once = false;
+                int n = appendItems + 1;
+                Random rand = new Random();
+                Iterator<Wal> itr = walerI.iterator(lsn);
+                for (int i = 0; i < n; ++i) {
+                    for (; !itr.hasNext();) {
+                        //IoUtils.debug("wait appender at i %d", i);
+                        sleep(rand.nextInt(100));
+
+                        //IoUtils.debug("re-iterate at i %d", i);
+                        itr = walerI.iterator(lsn);
+                        // Skip last item
+                        if(once && itr.hasNext()) itr.next();
+
+                        if (i >= appendItems) {
+                            IoUtils.debug("complete");
+                            return null;
+                        }
+                    }
+                    Wal wal = itr.next();
+                    lsn = wal.getLsn();
+                    once = true;
+                    String data = wal.toString();
+                    String[] parts = data.split("=");
+                    asserts(parts.length == 2);
+                    asserts(Integer.parseInt(parts[1]) == i, "i = " +i);
+                }
+                IoUtils.debug("complete");
+                return null;
+            }
+        }, "iterator");
+
+        iterator.start();
+        appender.start();
+
+        join(iterator);
+        join(appender);
+        iterator.check();
+        appender.check();
+
+        walerA.close();
+        walerI.close();
+        cleanup();
+    }
+
+    protected void twoProcs(final int appendItems) throws IOException {
+        final File dir = getDir();
+        final Waler walerA = WalerFactory.open(dir);
+
+        Task<Void> appender = newTask(new Callable<Void>() {
+            @Override
+            public Void call() throws IOException {
+                int n = appendItems;
+                for(int i = 0; i < n; ++i) {
+                    walerA.append(System.currentTimeMillis()+": i=" + i);
+                }
+                IoUtils.debug("complete");
+                return null;
+            }
+        }, "appender");
+
+        String iterateClass = IterateProcOnAppend.class.getName();
+        Proc iterator = newProc(iterateClass, new String[]{
+                "--append-items", appendItems+"",
+                "--data-dir", dir+""
+        });
+        final String curDir = System.getProperty("user.dir");
+        iterator.setWorkDir(curDir);
+        final String target = curDir+File.separator+"target";
+        iterator.setProperties(new String[]{"-classpath",
+                target+File.separator+"classes:"+target+File.separator+"test-classes",
+                //"-Dorg.walog.debug=true"
+        });
+
+        iterator.start();
+        appender.start();
+
+        join(iterator);
+        join(appender);
+        iterator.check();
+        appender.check();
+
+        walerA.close();
+        cleanup();
     }
 
 }

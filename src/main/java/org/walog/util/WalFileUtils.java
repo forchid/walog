@@ -158,11 +158,16 @@ public final class WalFileUtils {
     }
     
     public static File[] listFiles(File dir) throws  IllegalStateException  {
-        return listFiles(dir, false);
+        return listFiles(dir, false, null);
     }
     
-    public static File[] listFiles(File dir, boolean asc) throws  IllegalStateException {
-        final File[] logFiles = dir.listFiles(new WalFileFilter());
+    public static File[] listFiles(File dir, boolean asc) throws IllegalStateException {
+        return listFiles(dir, asc, null);
+    }
+
+    public static File[] listFiles(File dir, boolean asc, String fromFile)
+            throws IllegalStateException {
+        final File[] logFiles = dir.listFiles(new WalFileFilter(fromFile));
         if (logFiles == null) {
             throw new IllegalStateException("Can't list files");
         }
@@ -170,17 +175,21 @@ public final class WalFileUtils {
         return logFiles;
     }
     
-    public static File lastFile(File dir) throws  IllegalStateException  {
-        File[] logFiles = listFiles(dir, false);
+    public static File lastFile(File dir) throws IllegalStateException  {
+        return lastFile(dir, null);
+    }
+
+    public static File lastFile(File dir, String fromFile) throws IllegalStateException  {
+        File[] logFiles = listFiles(dir, false, fromFile);
         if (logFiles.length > 0) {
             return logFiles[0];
         }
-        
+
         return null;
     }
     
-    public static File firstFile(File dir) throws  IllegalStateException {
-        File[] logFiles = listFiles(dir, true);
+    public static File firstFile(File dir) throws IllegalStateException {
+        File[] logFiles = listFiles(dir, true, null);
         if (logFiles.length > 0) {
             return logFiles[0];
         }
@@ -193,7 +202,24 @@ public final class WalFileUtils {
         return new File(dir, filename);
     }
 
+    public static long lastFileLsn(File dir, String fromFile) {
+        final File lastFile = lastFile(dir, fromFile);
+        if (lastFile == null) {
+            throw new IllegalStateException("Access file error");
+        }
+        return fileLsn(lsn(lastFile.getName()));
+    }
+
     static class WalFileFilter implements FileFilter {
+        final String fromFile;
+
+        public WalFileFilter() {
+            this(null);
+        }
+
+        public WalFileFilter(String fromFile) {
+            this.fromFile = fromFile;
+        }
         
         @Override
         public boolean accept(File file) {
@@ -214,8 +240,11 @@ public final class WalFileUtils {
                 }
                 return false;
             }
+            if (this.fromFile == null) {
+                return true;
+            }
             
-            return true;
+            return (name.compareTo(fromFile) >= 0);
         }
     }
     

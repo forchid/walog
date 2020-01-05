@@ -25,6 +25,7 @@
 package org.walog;
 
 import org.walog.util.IoUtils;
+import org.walog.util.Proc;
 import org.walog.util.Task;
 
 import java.io.File;
@@ -116,7 +117,7 @@ public abstract class Test {
         }
     }
 
-    protected static void sleep(long millis) {
+    public static void sleep(long millis) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
@@ -124,7 +125,7 @@ public abstract class Test {
         }
     }
 
-    protected static void join(Thread t) {
+    public static void join(Thread t) {
         try {
             t.join();
         } catch (InterruptedException e) {
@@ -132,44 +133,62 @@ public abstract class Test {
         }
     }
 
-    protected static <V> Task<V> newTask(Callable<V> callable, String name) {
+    public static void join(Proc p) {
+        try {
+            p.join();
+        } catch (InterruptedException e) {
+            // Ignore
+        }
+    }
+
+    public static <V> Task<V> newTask(Callable<V> callable, String name) {
         return new Task<>(callable, name);
     }
 
-    protected static <V> Task<V> newTask(Callable<V> callable) {
+    public static <V> Task<V> newTask(Callable<V> callable) {
         return new Task<>(callable);
     }
 
-    protected static void fail(String message) throws AssertionError {
+    public static Proc newProc(String mainClass, String[] props, String[] args) {
+        Proc proc = new Proc(mainClass, args);
+        proc.setProperties(props);
+        return proc;
+    }
+
+    public static Proc newProc(String mainClass, String[] args) {
+        return new Proc(mainClass, args);
+    }
+
+    public static void fail(String message) throws AssertionError {
         throw new AssertionError(message);
     }
 
-    protected static void asserts(boolean b) throws AssertionError {
+    public static void asserts(boolean b) throws AssertionError {
         asserts(b, "Asserts failed");
     }
 
-    protected static void asserts(boolean b, String message) throws AssertionError {
+    public static void asserts(boolean b, String message) throws AssertionError {
         if (b) {
             return;
         }
         throw new AssertionError(message);
     }
 
-    protected static void equals(long a, long b, String message) throws AssertionError {
+    public static void equals(long a, long b, String message) throws AssertionError {
         if (a == b) {
             return;
         }
         throw new AssertionError(message);
     }
 
-    protected static void equals(double a, double b, String message) throws AssertionError {
+    public static void equals(double a, double b, String message) throws AssertionError {
         if (a == b) {
             return;
         }
         throw new AssertionError(message);
     }
 
-    protected static void equals(Object a, Object b, String message) throws AssertionError {
+    public static void equals(Object a, Object b, String message) throws AssertionError {
         if (a == b) {
             return;
         }
