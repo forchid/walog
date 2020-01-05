@@ -26,11 +26,11 @@ package org.walog.internal;
 
 public class AppendPurgeToItem extends AppendItem<Object> {
 
-    public final String walFile;
+    public final String filename;
 
-    public AppendPurgeToItem(NioAppender appender, String walFile) {
+    public AppendPurgeToItem(NioAppender appender, String filename) {
         super(TAG_PURGE, appender);
-        this.walFile = walFile;
+        this.filename = filename;
     }
 
 }

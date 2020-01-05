@@ -190,12 +190,12 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public void purgeTo(String walFile) throws IOException {
+    public void purgeTo(String filename) throws IOException {
         final AppendPurgeToItem item;
         ensureOpen();
 
         final NioAppender appender = getAppender();
-        item = new AppendPurgeToItem(appender, walFile);
+        item = new AppendPurgeToItem(appender, filename);
         appender.append(item);
     }
 

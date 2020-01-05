@@ -105,13 +105,13 @@ class NioAppender extends Thread implements AutoCloseable {
 
     public <V> V append(final AppendItem<V> item) throws IOException {
         try {
-            if (!isOpen()) {
-                throw new IOException("wal appender closed");
-            }
+            ensureOpen();
 
             if (isAsyncMode()) {
                 // Try to append into queue
                 if (this.appendQueue.offer(item, APPEND_TIMEOUT, MILLISECONDS)) {
+                    // Check again: appender may be closed before item enqueued
+                    ensureOpen();
                     return (item.get());
                 }
             } else {
@@ -136,8 +136,10 @@ class NioAppender extends Thread implements AutoCloseable {
         return null;
     }
 
-    protected static boolean isAsyncMode() {
-        return (ASYNC_MODE == 1);
+    protected void ensureOpen() throws IOException {
+        if (!isOpen()) {
+            throw new IOException("wal appender closed");
+        }
     }
 
     @Override
@@ -244,7 +246,7 @@ class NioAppender extends Thread implements AutoCloseable {
         final File dir = this.waler.getDirectory();
         final File[] files = WalFileUtils.listFiles(dir, true);
         for (final File file: files) {
-            if (file.getName().compareTo(item.walFile) < 0) {
+            if (file.getName().compareTo(item.filename) < 0) {
                 if (!file.delete()) {
                     item.setResult(new IOException("Can't purge wal file: " + file));
                     return;
@@ -432,6 +434,10 @@ class NioAppender extends Thread implements AutoCloseable {
             }
             item.setResult(cause);
         }
+    }
+
+    protected static boolean isAsyncMode() {
+        return (ASYNC_MODE == 1);
     }
 
 }
