@@ -49,6 +49,10 @@ public interface Waler extends AutoCloseable {
      */
     Wal append(byte[] payload) throws IOException;
 
+    Wal append(byte[] payload, int offset, int length) throws IOException;
+
+    Wal append(String payload) throws IOException;
+
     /** Get current first log in this wal logger.
      *
      * @return the first log, or null if no any log

@@ -26,6 +26,7 @@ package org.walog.internal;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Iterator;
 
 import org.walog.Wal;
@@ -85,6 +86,16 @@ public class NioWaler implements Waler {
         final NioAppender appender = getAppender();
         final AppendPayloadItem item = new AppendPayloadItem(appender, payload);
         return appender.append(item);
+    }
+
+    @Override
+    public Wal append(byte[] payload, int offset, int length) throws IOException {
+        return append(Arrays.copyOfRange(payload, offset, offset + length));
+    }
+
+    @Override
+    public Wal append(String payload) throws IOException {
+        return append(payload.getBytes(Wal.CHARSET));
     }
 
     protected NioAppender getAppender() {

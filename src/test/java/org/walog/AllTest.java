@@ -22,61 +22,56 @@
  * SOFTWARE.
  */
 
-package org.walog.internal;
+package org.walog;
 
-import org.walog.Wal;
-import org.walog.util.WalFileUtils;
+import org.walog.util.IoUtils;
 
-public class SimpleWal implements Wal {
+import java.util.ArrayList;
+import java.util.List;
 
-    protected final long lsn;
-    final byte prefix;
-    protected final byte[] data;
+public class AllTest extends Test {
 
-    protected SimpleWal(long lsn, byte prefix, byte[] data) {
-        this.lsn = lsn;
-        this.prefix = prefix;
-        this.data= data;
+    protected final List<Test> tests = new ArrayList<>();
+
+    public static void main(String[] args) {
+        for (int i = 0; i < iterates; ++i)
+            new AllTest(i).test();
     }
 
-    int getHeadSize() {
-        final int p = this.prefix & 0xff;
-        if (p < 0xfb) {
-            return 1;
-        } else if (p == 0xfc) {
-            return 3;
-        } else {
-            return 4;
+    public AllTest(int iterate) {
+        super(iterate);
+    }
+
+    @Override
+    protected void doTest() {
+        final long start = System.currentTimeMillis();
+        for (final Test t: this.tests) {
+            final long ts = System.currentTimeMillis();
+            IoUtils.info(">> Iterate-%d: %s start", this.iterate, t.getName());
+            t.test();
+            final long te = System.currentTimeMillis();
+            IoUtils.info("<< Iterate-%d: %s end(time %dms)", this.iterate, t.getName(), (te - ts));
         }
-    }
-
-    public int getOffset() {
-        return WalFileUtils.fileOffset(this.lsn);
-    }
-
-    public long nextLsn() {
-        final int offset = getOffset();
-        final int nextOffset = offset + getHeadSize() + getData().length + 8;
-        if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK) {
-            throw new IllegalStateException("offset full");
-        }
-
-        return (WalFileUtils.fileLsn(this.lsn) + nextOffset);
+        final long end = System.currentTimeMillis();
+        IoUtils.info("%s complete(time %dms)", getName(), (end - start));
     }
 
     @Override
-    public long getLsn() {
-        return this.lsn;
+    protected void prepare() {
+        final int i = this.iterate;
+
+        add(new IterateOnAppendTest(i))
+        .add(new WalerFactoryTest(i));
     }
 
     @Override
-    public byte[] getData() {
-        return this.data;
+    protected void cleanup() {
+        this.tests.clear();
     }
 
-    @Override
-    public String toString() {
-        return (new String(this.data, Wal.CHARSET));
+    protected AllTest add(Test t) {
+        this.tests.add(t);
+        return this;
     }
 
 }

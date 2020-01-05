@@ -25,12 +25,14 @@
 package org.walog;
 
 import org.walog.util.IoUtils;
+import org.walog.util.Task;
 import org.walog.util.WalFileUtils;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Random;
+import java.util.concurrent.Callable;
 
 /**
  * @author little-pan
@@ -39,20 +41,17 @@ import java.util.Random;
  */
 public class WalerFactoryTest extends Test {
 
-    protected static final String dir = "walerFactory";
-
-    public static void main(String[] args) throws IOException {
-        new WalerFactoryTest().test();
+    public static void main(String[] args) {
+        new WalerFactoryTest(0).test();
     }
 
-    @Override
-    protected void cleanup() {
-        deleteDir(dir);
+    public WalerFactoryTest(int iterate) {
+        super(iterate);
     }
 
     @Override
     protected void doTest() throws IOException {
-        final File dirFile = getDir(dir);
+        final File dirFile = getDir();
         // 10 million:
         // 2020-01-02 sync append mode:  1   thread  append 35758ms, iterate 9353ms
         // 2020-01-04 sync append mode:  10  threads append 84455ms, iterate 8826ms
@@ -64,35 +63,33 @@ public class WalerFactoryTest extends Test {
         
         final Waler walera = WalerFactory.open(dirFile);
         long startTime = System.currentTimeMillis();
-        final Thread[] workers = new Thread[c];
+        final Task<?>[] workers = new Task[c];
         for (int i = 0, m = 0; i < c; ++i) {
             final int s = m + step, e = s + step;
             m = e;
-            final Thread t = new Thread(new Runnable() {
+            final Task<Void> t = newTask(new Callable<Void>() {
                 @Override
-                public void run() {
-                    try {
-                        final Random random = new Random();
-                        for (int i = s; i < e; ++i) {
-                            final int a = random.nextInt(i), b = random.nextInt(i);
-                            String data = System.currentTimeMillis()+":"+a + "," + b + "," + (a + b);
-                            if (walera.append(data.getBytes()) == null) {
-                                throw new RuntimeException("append wal failed");
-                            }
-                            if (i % 10000 == 0) {
-                                walera.sync();
-                            }
+                public Void call() throws IOException {
+                    final Random random = new Random();
+                    for (int i = s; i < e; ++i) {
+                        final int a = random.nextInt(i), b = random.nextInt(i);
+                        final long cur = System.currentTimeMillis();
+                        String data = cur+":"+a + "," + b + "," + (a + b);
+                        Wal wal = walera.append(data.getBytes());
+                        asserts( wal != null, "append wal failed");
+                        if (i % 10000 == 0) {
+                            walera.sync();
                         }
-                    } catch (IOException e) {
-                        e.printStackTrace();
                     }
+                    return null;
                 }
             }, "worker-"+i);
             t.start();
             workers[i] = t;
         }
-        for (final Thread t: workers) {
+        for (final Task<?> t: workers) {
             join(t);
+            t.check();
         }
         long endTime = System.currentTimeMillis();
         IoUtils.info("Append %d items, time %dms", n, (endTime - startTime));
@@ -135,20 +132,17 @@ public class WalerFactoryTest extends Test {
     protected void checkWal(Wal wal) {
         // timestamp:a,b,sum
         String result = new String(wal.getData());
+        //IoUtils.info("log data: %s", result);
         int i = result.indexOf(':');
-        if (i == -1) {
-            throw new RuntimeException("Data corrupted");
-        }
+        asserts (i != -1, "Data corrupted");
+
         result = result.substring(i + 1);
         String[] sa = result.split(",");
-        if (sa.length != 3){
-            throw new RuntimeException("Data corrupted");
-        }
+        asserts (sa.length == 3, "Data corrupted");
+
         final int a = Integer.parseInt(sa[0]), b = Integer.parseInt(sa[1]);
         final int sum = Integer.parseInt(sa[2]);
-        if (a + b != sum) {
-            throw new RuntimeException("Data corrupted");
-        }
+        asserts (a + b == sum, "Data corrupted");
     }
 
 }

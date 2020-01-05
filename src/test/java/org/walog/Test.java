@@ -24,8 +24,12 @@
 
 package org.walog;
 
+import org.walog.util.IoUtils;
+import org.walog.util.Task;
+
 import java.io.File;
 import java.io.IOException;
+import java.util.concurrent.Callable;
 
 /**
  * @author little-pan
@@ -36,15 +40,24 @@ public abstract class Test {
     
     protected final static File baseDir = new File(System.getProperty("user.dir"));
     protected final static File testDir = new File(baseDir, "temp");
+    protected static final int iterates = Integer.getInteger("org.walog.test.iterates", 3);
+
+    protected final int iterate;
     
-    protected Test() {
-        
+    protected Test(int iterate) {
+        this.iterate = iterate;
+    }
+
+    protected String getName() {
+        return getClass().getSimpleName();
     }
     
-    public void test() throws IOException {
+    public void test() {
         try {
             prepare();
             doTest();
+        } catch (IOException e) {
+            throw new RuntimeException(getName()+" failed", e);
         } finally {
             cleanup();
         }
@@ -52,16 +65,26 @@ public abstract class Test {
 
     protected void prepare() {
         cleanup();
+        getDir(getName());
     }
 
     protected abstract void doTest() throws IOException;
 
-    protected void cleanup() {}
+    protected void cleanup() {
+        deleteDir(getName());
+    }
+
+    protected File getDir() {
+        return getDir(getName());
+    }
     
     public static File getDir(String dir) {
         File file = new File(testDir, dir);
-        if (!file.isDirectory() && !file.mkdirs()) {
-            throw new IllegalStateException("Can't create dir: " + file);
+        if (!file.isDirectory()) {
+            if (!file.mkdirs()) {
+                throw new IllegalStateException("Can't create dir: " + file);
+            }
+            IoUtils.info("Create directory: %s", file);
         }
 
         return file;
@@ -77,13 +100,19 @@ public abstract class Test {
             for (final File f: dirFile.listFiles()) {
                 if (f.isDirectory()) {
                     deleteDir(dirFile, f.getName());
-                } else if (f.isFile() && !f.delete()){
-                    throw new IllegalStateException("Can't delete file: " + f);
+                    continue;
+                }
+                if (f.isFile()){
+                    if (!f.delete()) {
+                        throw new IllegalStateException("Can't delete file: " + f);
+                    }
+                    IoUtils.info("Delete file: %s", f);
                 }
             }
             if (!dirFile.delete()) {
                 throw new IllegalStateException("Can't delete directory: " + dirFile);
             }
+            IoUtils.info("Delete directory: %s", dirFile);
         }
     }
 
@@ -100,6 +129,55 @@ public abstract class Test {
             t.join();
         } catch (InterruptedException e) {
             // Ignore
+        }
+    }
+
+    protected static <V> Task<V> newTask(Callable<V> callable, String name) {
+        return new Task<>(callable, name);
+    }
+
+    protected static <V> Task<V> newTask(Callable<V> callable) {
+        return new Task<>(callable);
+    }
+
+    protected static void fail(String message) throws AssertionError {
+        throw new AssertionError(message);
+    }
+
+    protected static void asserts(boolean b) throws AssertionError {
+        asserts(b, "Asserts failed");
+    }
+
+    protected static void asserts(boolean b, String message) throws AssertionError {
+        if (b) {
+            return;
+        }
+        throw new AssertionError(message);
+    }
+
+    protected static void equals(long a, long b, String message) throws AssertionError {
+        if (a == b) {
+            return;
+        }
+        throw new AssertionError(message);
+    }
+
+    protected static void equals(double a, double b, String message) throws AssertionError {
+        if (a == b) {
+            return;
+        }
+        throw new AssertionError(message);
+    }
+
+    protected static void equals(Object a, Object b, String message) throws AssertionError {
+        if (a == b) {
+            return;
+        }
+        if (a == null || b == null) {
+            throw new AssertionError(message);
+        }
+        if (!a.equals(b)) {
+            throw new AssertionError(message);
         }
     }
 

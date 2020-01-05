@@ -24,6 +24,9 @@
 
 package org.walog;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
 /** The write-ahead log.
  * 
  * @author little-pan
@@ -33,6 +36,8 @@ package org.walog;
 public interface Wal {
 
     int LSN_OFFSET_MASK = 0x3fffffff;
+
+    Charset CHARSET = StandardCharsets.UTF_8;
 
     /** The lowest 30 bits of the lsn is offset in WAL file, and
      * the highest 34bits is the WAL file index.

@@ -22,61 +22,58 @@
  * SOFTWARE.
  */
 
-package org.walog.internal;
+package org.walog.util;
 
-import org.walog.Wal;
-import org.walog.util.WalFileUtils;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-public class SimpleWal implements Wal {
+public class Task<V> extends Thread {
 
-    protected final long lsn;
-    final byte prefix;
-    protected final byte[] data;
+    protected final AtomicBoolean flag;
+    protected final Callable<V> task;
+    protected volatile V result;
+    protected volatile Throwable cause;
 
-    protected SimpleWal(long lsn, byte prefix, byte[] data) {
-        this.lsn = lsn;
-        this.prefix = prefix;
-        this.data= data;
+    public Task(Callable<V> task) {
+        this(task, null);
     }
 
-    int getHeadSize() {
-        final int p = this.prefix & 0xff;
-        if (p < 0xfb) {
-            return 1;
-        } else if (p == 0xfc) {
-            return 3;
-        } else {
-            return 4;
+    public Task(Callable<V> task, String name) {
+        if (name != null) {
+            setName(name);
+        }
+        setDaemon(true);
+        this.task = task;
+        this.flag = new AtomicBoolean();
+    }
+
+    @Override
+    public void run() {
+        try {
+            this.result = this.task.call();
+            this.flag.set(true);
+        } catch (final Throwable cause) {
+            this.flag.set(false);
+            this.cause = cause;
         }
     }
 
-    public int getOffset() {
-        return WalFileUtils.fileOffset(this.lsn);
-    }
-
-    public long nextLsn() {
-        final int offset = getOffset();
-        final int nextOffset = offset + getHeadSize() + getData().length + 8;
-        if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK) {
-            throw new IllegalStateException("offset full");
+    public void check() {
+        if (!ok()) {
+            throw new AssertionError(getName()+" failed", this.cause);
         }
-
-        return (WalFileUtils.fileLsn(this.lsn) + nextOffset);
     }
 
-    @Override
-    public long getLsn() {
-        return this.lsn;
+    public boolean ok() {
+        return this.flag.get();
     }
 
-    @Override
-    public byte[] getData() {
-        return this.data;
+    public V getResult() {
+        return this.result;
     }
 
-    @Override
-    public String toString() {
-        return (new String(this.data, Wal.CHARSET));
+    public Throwable getCause() {
+        return this.cause;
     }
 
 }

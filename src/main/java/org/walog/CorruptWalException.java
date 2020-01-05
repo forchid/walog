@@ -39,12 +39,13 @@ public class CorruptWalException extends RuntimeException {
     @Override
     public String getMessage() {
         String base = super.getMessage();
-        return String.format("%s: offset 0x%x in '%s'", base, getOffset(), getFile());
+        return String.format("%s - offset 0x%x in '%s'", base, getOffset(), getFile());
     }
 
     @Override
     public String toString() {
-        return getMessage();
+        String className = getClass().getName();
+        return (className+ ": "+getMessage());
     }
 
     public String getFile() {
