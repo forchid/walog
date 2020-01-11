@@ -123,8 +123,8 @@ public class WalerFactoryTest extends Test {
         if (lastFile == null) {
             throw new RuntimeException("Last wal file lost");
         }
-        walerb.purgeTo(wal.getLsn());
-        walerb.clear();
+        asserts(walerb.purgeTo(wal.getLsn()));
+        asserts(walerb.clear());
 
         walerb.close();
     }

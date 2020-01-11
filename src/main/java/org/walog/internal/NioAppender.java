@@ -176,14 +176,15 @@ class NioAppender extends Thread implements AutoCloseable {
                 // Try wait more
                 try {
                     item = this.appendQueue.poll(1000, MILLISECONDS);
-                    if (AUTO_FLUSH == 1 && this.appendedFromSync
-                            && System.currentTimeMillis() - this.lastSyncTime >= 1000L) {
-                        IoUtils.debug("Auto flush start");
-                        recovery();
-                        this.appendFile.sync();
-                        this.appendedFromSync = false;
-                        this.lastSyncTime = System.currentTimeMillis();
-                        IoUtils.debug("Auto flush end");
+                    if (AUTO_FLUSH == 1 && this.appendedFromSync) {
+                        if (System.currentTimeMillis() - this.lastSyncTime >= 1000L) {
+                            IoUtils.debug("Auto flush start");
+                            recovery();
+                            this.appendFile.sync();
+                            this.appendedFromSync = false;
+                            this.lastSyncTime = System.currentTimeMillis();
+                            IoUtils.debug("Auto flush end");
+                        }
                     }
                 } catch (final InterruptedException e) {
                     // Note: shouldn't interrupt this appender thread
@@ -204,28 +205,35 @@ class NioAppender extends Thread implements AutoCloseable {
         }
     }
 
-    protected void handle(final AppendItem<?> item, final boolean syncAppend)
-            throws IOException {
-        switch (item.tag) {
-            case AppendItem.TAG_PAYLOAD:
-                this.batchItems.add((AppendPayloadItem)item);
-                if (syncAppend) {
-                    doAppend();
-                }
-                break;
-            case AppendItem.TAG_SYNC:
-                sync(item);
-                break;
-            case AppendItem.TAG_PURGE:
-                purgeTo((AppendPurgeToItem)item);
-                break;
-            case AppendItem.TAG_CLEAR:
-                clear(item);
-                break;
-            default:
-                String message = "Unsupported append item tag: " + item.tag;
-                item.setResult(new IllegalArgumentException(message));
-                break;
+    protected void handle(AppendItem<?> item, boolean syncAppend) throws IOException {
+        boolean failed = true;
+        try {
+            switch (item.tag) {
+                case AppendItem.TAG_PAYLOAD:
+                    this.batchItems.add((AppendPayloadItem)item);
+                    if (syncAppend) {
+                        doAppend();
+                    }
+                    break;
+                case AppendItem.TAG_SYNC:
+                    sync(item);
+                    break;
+                case AppendItem.TAG_PURGE:
+                    purgeTo((AppendPurgeToItem)item);
+                    break;
+                case AppendItem.TAG_CLEAR:
+                    clear(item);
+                    break;
+                default:
+                    String message = "Unsupported append item tag: " + item.tag;
+                    item.setResult(new IllegalArgumentException(message));
+                    break;
+            }
+            failed = false;
+        } finally {
+            if (failed) {
+                close();
+            }
         }
     }
 
@@ -239,23 +247,18 @@ class NioAppender extends Thread implements AutoCloseable {
         this.lastSyncTime = System.currentTimeMillis();
     }
 
-    protected void purgeTo(AppendPurgeToItem item) throws IOException {
-        doAppend();
-        recovery();
-
-        final File dir = this.waler.getDirectory();
-        final File[] files = WalFileUtils.listFiles(dir, true);
-        for (final File file: files) {
-            if (file.getName().compareTo(item.filename) < 0) {
-                if (!file.delete()) {
-                    item.setResult(new IOException("Can't purge wal file: " + file));
-                    return;
-                }
-                continue;
+    protected void purgeTo(AppendPurgeToItem item) {
+        File dir = this.waler.getDirectory();
+        File[] files = WalFileUtils.listFilesTo(dir, true, item.filename);
+        for (File file: files) {
+            IoUtils.debug("Purge wal file '%s'", file);
+            if (file.exists() && !file.delete()) {
+                IoUtils.debug("Can't purge wal file '%s'", file);
+                item.setResult(Boolean.FALSE);
+                return;
             }
-            break;
         }
-        item.setResult(AppendItem.DUMMY_VALUE);
+        item.setResult(Boolean.TRUE);
     }
 
     protected void clear(AppendItem<?> item) throws IOException {
@@ -264,22 +267,26 @@ class NioAppender extends Thread implements AutoCloseable {
 
         // Prepare
         // - Close old append file
-        final long nextFileLsn = WalFileUtils.nextFileLsn(this.appendFile.lsn);
-        final File nextFile = this.waler.newFile(WalFileUtils.filename(nextFileLsn));
+        long nextFileLsn = WalFileUtils.nextFileLsn(this.appendFile.lsn);
+        String nextFilename = WalFileUtils.filename(nextFileLsn);
+        File nextFile = this.waler.newFile(nextFilename);
         IoUtils.close(this.appendFile);
 
         // - Create a new append file
-        final File dir = this.waler.getDirectory();
-        final File[] files = WalFileUtils.listFiles(dir, true);
+        File dir = this.waler.getDirectory();
+        File[] files = WalFileUtils.listFiles(dir, true);
         this.appendFile = new NioWalFile(nextFile);
 
         // Remove all previous files(include old append file)
-        for (final File file: files) {
-            if (!file.delete()) {
-                item.setResult(new IOException("Can't delete wal file: " + nextFile));
+        for (File file: files) {
+            IoUtils.debug("Delete wal file '%s'", file);
+            if (file.exists() && !file.delete()) {
+                IoUtils.debug("Can't delete wal file '%s'", file);
+                item.setResult(Boolean.FALSE);
+                return;
             }
         }
-        item.setResult(AppendItem.DUMMY_VALUE);
+        item.setResult(Boolean.TRUE);
     }
 
     protected void doAppend() throws IOException {
@@ -399,12 +406,11 @@ class NioAppender extends Thread implements AutoCloseable {
 
     @Override
     public void close() {
-        this.open = false;
-
         IoUtils.close(this.appendFile);
         IoUtils.close(this.appendFileLock);
         IoUtils.close(this.appendLockChan);
         IoUtils.close(this.appendLockFile);
+        this.open = false;
     }
 
     protected void cancelQueuedItems() {

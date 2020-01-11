@@ -24,7 +24,7 @@
 
 package org.walog.internal;
 
-public class AppendPurgeToItem extends AppendItem<Object> {
+public class AppendPurgeToItem extends AppendItem<Boolean> {
 
     public final String filename;
 

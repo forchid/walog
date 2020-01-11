@@ -69,12 +69,12 @@ public interface Waler extends AutoCloseable {
     Wal get(long lsn) throws IOException;
 
     Iterator<Wal> iterator(long lsn);
-    
-    void purgeTo(String filename) throws IOException;
 
-    void purgeTo(long fileLsn) throws IOException;
+    boolean purgeTo(String filename) throws IOException;
 
-    void clear() throws IOException;
+    boolean purgeTo(long fileLsn) throws IOException;
+
+    boolean clear() throws IOException;
 
     void sync() throws IOException;
     

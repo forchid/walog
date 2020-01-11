@@ -158,16 +158,20 @@ public final class WalFileUtils {
     }
     
     public static File[] listFiles(File dir) throws  IllegalStateException  {
-        return listFiles(dir, false, null);
+        return listFiles(dir, false, null, null);
     }
     
     public static File[] listFiles(File dir, boolean asc) throws IllegalStateException {
-        return listFiles(dir, asc, null);
+        return listFiles(dir, asc, null, null);
     }
 
-    public static File[] listFiles(File dir, boolean asc, String fromFile)
+    public static File[] listFiles(File dir, boolean asc, String fromFile) {
+        return listFiles(dir, asc, fromFile, null);
+    }
+
+    public static File[] listFiles(File dir, boolean asc, String fromFile, String toFile)
             throws IllegalStateException {
-        final File[] logFiles = dir.listFiles(new WalFileFilter(fromFile));
+        File[] logFiles = dir.listFiles(new WalFileFilter(fromFile, toFile));
         if (logFiles == null) {
             throw new IllegalStateException("Can't list files");
         }
@@ -180,7 +184,7 @@ public final class WalFileUtils {
     }
 
     public static File lastFile(File dir, String fromFile) throws IllegalStateException  {
-        File[] logFiles = listFiles(dir, false, fromFile);
+        File[] logFiles = listFiles(dir, false, fromFile, null);
         if (logFiles.length > 0) {
             return logFiles[0];
         }
@@ -189,7 +193,7 @@ public final class WalFileUtils {
     }
     
     public static File firstFile(File dir) throws IllegalStateException {
-        File[] logFiles = listFiles(dir, true, null);
+        File[] logFiles = listFiles(dir, true, null, null);
         if (logFiles.length > 0) {
             return logFiles[0];
         }
@@ -210,15 +214,17 @@ public final class WalFileUtils {
         return fileLsn(lsn(lastFile.getName()));
     }
 
+    public static File[] listFilesTo(File dir, boolean asc, String toFile) {
+        return listFiles(dir, asc, null, toFile);
+    }
+
     static class WalFileFilter implements FileFilter {
-        final String fromFile;
+        protected final String fromFile; // included
+        protected final String toFile;   // excluded
 
-        public WalFileFilter() {
-            this(null);
-        }
-
-        public WalFileFilter(String fromFile) {
+        public WalFileFilter(String fromFile, String toFile) {
             this.fromFile = fromFile;
+            this.toFile   = toFile;
         }
         
         @Override
@@ -240,11 +246,17 @@ public final class WalFileUtils {
                 }
                 return false;
             }
-            if (this.fromFile == null) {
+
+            if (this.fromFile == null && this.toFile == null) {
                 return true;
+            } else if (this.fromFile == null) {
+                return (name.compareTo(this.toFile) < 0);
+            } else if (this.toFile == null) {
+                return (name.compareTo(this.fromFile) >= 0);
+            } else {
+                return (name.compareTo(this.fromFile) >= 0 &&
+                        name.compareTo(this.toFile) < 0);
             }
-            
-            return (name.compareTo(fromFile) >= 0);
         }
     }
     
@@ -252,17 +264,13 @@ public final class WalFileUtils {
         
         final boolean asc;
         
-        public WalFileSorter() {
-            this(false);
-        }
-        
         public WalFileSorter(boolean asc) {
             this.asc = asc;
         }
 
         @Override
         public int compare(File a, File b) {
-            final int i = a.getName().compareTo(b.getName());
+            int i = a.getName().compareTo(b.getName());
             return (this.asc? i: -i);
         }
         

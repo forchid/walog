@@ -82,20 +82,27 @@ public class NioWaler implements Waler {
     
     @Override
     public Wal append(byte[] payload) throws IOException {
-        ensureOpen();
-        final NioAppender appender = getAppender();
-        final AppendPayloadItem item = new AppendPayloadItem(appender, payload);
-        return appender.append(item);
+        return append(payload, true);
     }
 
     @Override
     public Wal append(byte[] payload, int offset, int length) throws IOException {
-        return append(Arrays.copyOfRange(payload, offset, offset + length));
+        return append(Arrays.copyOfRange(payload, offset, offset + length), false);
     }
 
     @Override
     public Wal append(String payload) throws IOException {
-        return append(payload.getBytes(Wal.CHARSET));
+        return append(payload.getBytes(Wal.CHARSET), false);
+    }
+
+    protected Wal append(byte[] payload, boolean copy) throws IOException {
+        ensureOpen();
+        if (copy) {
+            payload = Arrays.copyOf(payload, payload.length);
+        }
+        final NioAppender appender = getAppender();
+        final AppendPayloadItem item = new AppendPayloadItem(appender, payload);
+        return appender.append(item);
     }
 
     protected NioAppender getAppender() {
@@ -201,28 +208,28 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public void purgeTo(String filename) throws IOException {
+    public boolean purgeTo(String filename) throws IOException {
         final AppendPurgeToItem item;
         ensureOpen();
 
         final NioAppender appender = getAppender();
         item = new AppendPurgeToItem(appender, filename);
-        appender.append(item);
+        return appender.append(item);
     }
 
     @Override
-    public void purgeTo(long fileLsn) throws IOException {
-        purgeTo(WalFileUtils.filename(fileLsn));
+    public boolean purgeTo(long fileLsn) throws IOException {
+        return purgeTo(WalFileUtils.filename(fileLsn));
     }
 
     @Override
-    public void clear() throws IOException {
-        final AppendItem<Object> item;
+    public boolean clear() throws IOException {
+        final AppendItem<Boolean> item;
         ensureOpen();
 
         final NioAppender appender = getAppender();
         item = new AppendItem<>(AppendItem.TAG_CLEAR, appender);
-        appender.append(item);
+        return appender.append(item);
     }
 
     @Override
