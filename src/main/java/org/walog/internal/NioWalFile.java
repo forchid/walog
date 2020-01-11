@@ -354,7 +354,7 @@ public class NioWalFile implements  AutoCloseable {
         SimpleWal wal = null;
         try {
             for (; offset < size; ) {
-                wal = (SimpleWal)get(offset);
+                wal = get(offset);
                 offset += (wal.getHeadSize() + wal.getData().length + 4);
             }
         } catch (final EOFException e) {
