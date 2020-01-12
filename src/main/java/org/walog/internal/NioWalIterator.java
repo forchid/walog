@@ -37,6 +37,8 @@ import java.util.NoSuchElementException;
 
 class NioWalIterator implements Iterator<Wal> {
 
+    static final long LSN_UNDEFINED = -1L;
+
     protected final NioWaler waler;
     protected long lsn;
     protected NioWalFile walFile;
@@ -44,7 +46,13 @@ class NioWalIterator implements Iterator<Wal> {
     private boolean hasNextCalled;
     private boolean noNext;
 
-    public NioWalIterator(NioWaler waler, long lsn) {
+    public NioWalIterator(NioWaler waler) {
+        this.waler = waler;
+        this.lsn   = LSN_UNDEFINED;
+    }
+
+    public NioWalIterator(NioWaler waler, long lsn) throws IllegalArgumentException {
+        NioWaler.checkLsn(lsn);
         this.waler = waler;
         this.lsn   = lsn;
     }
@@ -61,11 +69,24 @@ class NioWalIterator implements Iterator<Wal> {
         }
         try {
             if (this.walFile == null) {
-                // Open wal file
+                // 1. Initialize lsn if undefined
+                if (this.lsn == LSN_UNDEFINED) {
+                    this.wal = this.waler.first();
+                    if (this.wal == null) {
+                        this.noNext = true;
+                        return false;
+                    }
+                    this.lsn = this.wal.getLsn();
+                }
+                // 2. Initialize wal file
                 this.walFile = this.waler.getWalFile(this.lsn);
                 if (this.walFile == null) {
                     this.noNext = true;
                     return false;
+                }
+                if (this.wal != null) {
+                    this.lsn = this.wal.nextLsn();
+                    return true;
                 }
             }
 

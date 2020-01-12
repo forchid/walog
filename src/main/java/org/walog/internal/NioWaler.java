@@ -217,7 +217,7 @@ public class NioWaler implements Waler {
         }
     }
 
-    private void checkLsn(long lsn) throws IllegalArgumentException {
+    static void checkLsn(long lsn) throws IllegalArgumentException {
         if (lsn < 0L) {
             throw new IllegalArgumentException("lsn must be bigger than or equals 0: " + lsn);
         }
@@ -322,7 +322,12 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public Iterator<Wal> iterator(long lsn) {
+    public Iterator<Wal> iterator() {
+        return new NioWalIterator(this);
+    }
+
+    @Override
+    public Iterator<Wal> iterator(long lsn) throws IllegalArgumentException {
         return new NioWalIterator(this, lsn);
     }
 

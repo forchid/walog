@@ -93,51 +93,57 @@ public class WalerFactoryTest extends Test {
         }
         long endTime = System.currentTimeMillis();
         IoUtils.info("Append %d items, time %dms", n, (endTime - startTime));
-        //sleep(5000);
         walera.close();
 
         final Waler walerb = WalerFactory.open(dirFile.getAbsolutePath());
-        // Check-1
+        // Check first
         Wal wal = walerb.first();
         checkWal(wal);
-        // Check-2
+        // Check get(lsn)
         wal = walerb.get(wal.getLsn());
         checkWal(wal);
 
-        // Check-3 by iterate()
+        // Check by iterate(lsn)
         Iterator<Wal> itr = walerb.iterator(wal.getLsn());
         startTime = System.currentTimeMillis();
         for (int i = 0; i < n; ++i) {
-            if(!itr.hasNext()) {
-                throw new RuntimeException("Data lost at i " + i);
-            }
+            asserts(itr.hasNext(), "Data lost at i " + i);
             wal = itr.next();
             checkWal(wal);
         }
-        if (itr.hasNext()) {
-            throw new RuntimeException("Data too many");
+        asserts (!itr.hasNext(), "Data too many");
+        endTime = System.currentTimeMillis();
+        IoUtils.info("Iterate-from-lsn %d items, time %dms", n, (endTime - startTime));
+
+        // Check by iterate()
+        itr = walerb.iterator();
+        startTime = System.currentTimeMillis();
+        for (int i = 0; i < n; ++i) {
+            asserts(itr.hasNext(), "Data lost at i " + i);
+            wal = itr.next();
+            checkWal(wal);
         }
+        asserts (!itr.hasNext(), "Data too many");
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate %d items, time %dms", n, (endTime - startTime));
 
-        // Check-4 by next(wal)
+        // Check by next(wal)
         startTime = System.currentTimeMillis();
         int i = 0;
         wal = walerb.first();
-        Wal last;
         do {
             ++i;
             checkWal(wal);
-            last = wal;
             wal = walerb.next(wal);
         } while (i < n);
         asserts(i == n && wal == null);
         endTime = System.currentTimeMillis();
         IoUtils.info("Next %d items, time %dms", n, (endTime - startTime));
 
-        // Check-5 by next(wal, timeout)
+        // Check by next(wal, timeout)
         startTime = System.currentTimeMillis();
         i = 0;
+        Wal last;
         wal = walerb.first();
         do {
             ++i;
