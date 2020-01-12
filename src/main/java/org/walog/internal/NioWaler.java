@@ -129,7 +129,7 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public Wal first() throws IOException {
+    public SimpleWal first() throws IOException {
         ensureOpen();
 
         final NioWalFile walFile = getFirstWalFile();
@@ -164,7 +164,12 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public Wal next(Wal wal) throws IOException, IllegalArgumentException {
+    public SimpleWal next(Wal wal) throws IOException, IllegalArgumentException {
+        return next(wal, -1L);
+    }
+
+    @Override
+    public SimpleWal next(Wal wal, long timeout) throws IOException, IllegalArgumentException {
         SimpleWal w;
 
         if (wal instanceof SimpleWal) {
@@ -179,10 +184,37 @@ public class NioWaler implements Waler {
                 return null;
             }
             File file = walFile.getFile(), lastFile;
-            lastFile = WalFileUtils.lastFile(this.dir, file.getName());
-            if (file.equals(lastFile)) {
-                return null;
+            final long expiredAt;
+            if (timeout > 0L) {
+                expiredAt = System.currentTimeMillis() + timeout;
+            } else {
+                expiredAt = 0L;
             }
+            for (;;) {
+                lastFile = WalFileUtils.lastFile(this.dir, file.getName());
+                if (!file.equals(lastFile)) {
+                    break;
+                }
+                if (timeout < 0L) {
+                    return null;
+                }
+                // wait logical
+                try {
+                    Thread.sleep(READ_POLL_TIMEOUT);
+                    w = get(nextLsn);
+                    if (w != null) {
+                        return w;
+                    }
+                    if (expiredAt > 0L && System.currentTimeMillis() > expiredAt) {
+                        // timeout occurs
+                        return null;
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            } // for
+
             nextLsn = WalFileUtils.nextFileLsn(wal.getLsn());
             return get(nextLsn);
         } else {
@@ -190,7 +222,7 @@ public class NioWaler implements Waler {
             if (w == null) {
                 return null;
             }
-            return next(w);
+            return next(w, timeout);
         }
     }
 

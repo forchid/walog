@@ -103,6 +103,7 @@ public class WalerFactoryTest extends Test {
         // Check-2
         wal = walerb.get(wal.getLsn());
         checkWal(wal);
+
         // Check-3 by iterate()
         Iterator<Wal> itr = walerb.iterator(wal.getLsn());
         startTime = System.currentTimeMillis();
@@ -118,7 +119,8 @@ public class WalerFactoryTest extends Test {
         }
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate %d items, time %dms", n, (endTime - startTime));
-        // Check-4 by next()
+
+        // Check-4 by next(wal)
         startTime = System.currentTimeMillis();
         int i = 0;
         wal = walerb.first();
@@ -127,10 +129,25 @@ public class WalerFactoryTest extends Test {
             ++i;
             checkWal(wal);
             last = wal;
-        } while ((wal = walerb.next(wal)) != null);
-        asserts(i == n);
+            wal = walerb.next(wal);
+        } while (i < n);
+        asserts(i == n && wal == null);
         endTime = System.currentTimeMillis();
         IoUtils.info("Next %d items, time %dms", n, (endTime - startTime));
+
+        // Check-5 by next(wal, timeout)
+        startTime = System.currentTimeMillis();
+        i = 0;
+        wal = walerb.first();
+        do {
+            ++i;
+            checkWal(wal);
+            last = wal;
+            wal = walerb.next(wal, i < n? 0: 100L);
+        } while (i < n);
+        asserts(i == n && wal == null);
+        endTime = System.currentTimeMillis();
+        IoUtils.info("Next-timeout %d items, time %dms", n, (endTime - startTime));
 
         final File lastFile = WalFileUtils.lastFile(dirFile);
         if (lastFile == null) {

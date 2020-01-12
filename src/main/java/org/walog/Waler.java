@@ -34,6 +34,8 @@ import java.util.Iterator;
  *
  */
 public interface Waler extends AutoCloseable {
+
+    long READ_POLL_TIMEOUT = Long.getLong("org.walog.readPollTimeout", 100L);
     
     /** Open the logger.
      *
@@ -77,6 +79,21 @@ public interface Waler extends AutoCloseable {
      * @throws IllegalArgumentException if the arg wal lsn is less than 0
      */
     Wal next(Wal wal) throws IOException, IllegalArgumentException;
+
+    /** The timeout version fo next(wal).
+     *
+     * @param wal the specified log
+     * @param timeout the wait timeout millisecond if has reached to the end of the last wal file.
+     *                1) The timeout bigger than 0, then waits the specified millisecond, or
+     *                there is a wal appended to the last wal file;
+     *                2) The timeout equal to 0, simply waits until there is a wal appended to
+     *                the last wal file;
+     *                3) The timeout less than 0, non-block and simple as next(wal)
+     * @return the next wal, or null if not found, timeout has elapsed, or interrupted
+     * @throws IOException if IO error
+     * @throws IllegalArgumentException if the arg wal lsn is less than 0
+     */
+    Wal next(Wal wal, long timeout) throws IOException, IllegalArgumentException;
 
     Iterator<Wal> iterator(long lsn);
 
