@@ -38,23 +38,33 @@ import java.util.NoSuchElementException;
 class NioWalIterator implements Iterator<Wal> {
 
     static final long LSN_UNDEFINED = -1L;
+    static final long NOT_TIMEOUT = -1L;
 
     protected final NioWaler waler;
     protected long lsn;
+    protected final long timeout;
     protected NioWalFile walFile;
-    protected SimpleWal wal;
+    protected SimpleWal wal, last;
     private boolean hasNextCalled;
     private boolean noNext;
 
     public NioWalIterator(NioWaler waler) {
         this.waler = waler;
         this.lsn   = LSN_UNDEFINED;
+        this.timeout = NOT_TIMEOUT;
     }
 
-    public NioWalIterator(NioWaler waler, long lsn) throws IllegalArgumentException {
+    public NioWalIterator(NioWaler waler, long lsn)
+            throws IllegalArgumentException {
+        this(waler, lsn, NOT_TIMEOUT);
+    }
+
+    public NioWalIterator(NioWaler waler, long lsn, long timeout)
+            throws IllegalArgumentException {
         NioWaler.checkLsn(lsn);
         this.waler = waler;
         this.lsn   = lsn;
+        this.timeout = timeout;
     }
 
     @Override
@@ -63,11 +73,28 @@ class NioWalIterator implements Iterator<Wal> {
         if (this.noNext) {
             return false;
         }
-
         if (this.wal != null) {
             return true;
         }
+
         try {
+            if (this.timeout >= 0L) {
+                // timeout version
+                if (this.last != null) {
+                    this.wal = this.waler.next(this.last, timeout);
+                } else if (this.lsn != LSN_UNDEFINED) {
+                    this.wal = this.waler.get(this.lsn);
+                } else {
+                    this.wal = this.waler.first(timeout);
+                }
+                if (this.wal == null) {
+                    this.noNext = true;
+                    return false;
+                }
+                this.lsn = this.wal.nextLsn();
+                return true;
+            }
+
             if (this.walFile == null) {
                 // 1. Initialize lsn if undefined
                 if (this.lsn == LSN_UNDEFINED) {
@@ -109,17 +136,15 @@ class NioWalIterator implements Iterator<Wal> {
 
             this.noNext = true;
             return false;
-        } catch (final IOException e) {
-            if (e instanceof EOFException) {
-                final File dir = this.waler.getDirectory();
-                final String filename = this.walFile.getFilename();
-                final long lastLsn = lastFileLsn(dir, filename);
-                if (this.walFile.getLsn() == lastLsn) {
-                    IoUtils.debug("Reach to the end of file '%s' in '%s'", filename, dir);
-                    this.noNext = true;
-                    return false;
-                }
+        } catch (EOFException e) {
+            if (this.walFile.isLastFile()) {
+                File file = this.walFile.getFile();
+                IoUtils.debug("Reach to the end of file '%s'", file);
+                this.noNext = true;
+                return false;
             }
+            throw new IllegalStateException(e);
+        } catch (IOException e) {
             throw new IllegalStateException(e);
         }
     }
@@ -134,9 +159,9 @@ class NioWalIterator implements Iterator<Wal> {
             throw new NoSuchElementException();
         }
 
-        final SimpleWal res = this.wal;
+        this.last = this.wal;
         this.wal = null;
-        return res;
+        return this.last;
     }
 
     @Override

@@ -144,13 +144,16 @@ public class NioWaler implements Waler {
             return walFile.get(0);
         } catch (EOFException e) {
             // No more or partial wal
-            return null;
+            if (walFile.isLastFile()) {
+                return null;
+            }
+            throw e;
         }
     }
 
     @Override
-    public Wal first(long timeout) throws IOException {
-        Wal wal = first();
+    public SimpleWal first(long timeout) throws IOException {
+        SimpleWal wal = first();
         if (wal != null || timeout < 0L) {
             return wal;
         }
@@ -213,7 +216,10 @@ public class NioWaler implements Waler {
             return walFile.get(offset);
         } catch (EOFException e) {
             // No more wal or partial wal
-            return null;
+            if (walFile.isLastFile()) {
+                return null;
+            }
+            throw e;
         }
     }
 
@@ -329,6 +335,11 @@ public class NioWaler implements Waler {
     @Override
     public Iterator<Wal> iterator(long lsn) throws IllegalArgumentException {
         return new NioWalIterator(this, lsn);
+    }
+
+    @Override
+    public Iterator<Wal> iterator(long lsn, long timeout) throws IllegalArgumentException {
+        return new NioWalIterator(this, lsn, timeout);
     }
 
     protected NioWalFile getFirstWalFile() throws IOException {

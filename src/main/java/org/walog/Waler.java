@@ -120,6 +120,8 @@ public interface Waler extends AutoCloseable {
      */
     Iterator<Wal> iterator(long lsn) throws IllegalArgumentException;
 
+    Iterator<Wal> iterator(long lsn, long timeout) throws IllegalArgumentException;
+
     boolean purgeTo(String filename) throws IOException;
 
     boolean purgeTo(long fileLsn) throws IOException;

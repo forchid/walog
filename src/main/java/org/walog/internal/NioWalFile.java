@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static java.lang.Integer.getInteger;
+import static org.walog.util.WalFileUtils.lastFileLsn;
 
 public class NioWalFile implements  AutoCloseable {
     protected static final String PROP_BLOCK_CACHE_SIZE = "org.walog.block.cacheSize";
@@ -122,6 +123,13 @@ public class NioWalFile implements  AutoCloseable {
 
     public long size() throws IOException {
         return this.chan.size();
+    }
+
+    public boolean isLastFile() {
+        final File dir = getFile().getParentFile();
+        final String filename = getFilename();
+        final long lastLsn = lastFileLsn(dir, filename);
+        return (getLsn() == lastLsn);
     }
 
     protected byte getByte(final int offset) throws IOException {

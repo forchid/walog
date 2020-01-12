@@ -98,13 +98,14 @@ public class WalerFactoryTest extends Test {
         final Waler walerb = WalerFactory.open(dirFile.getAbsolutePath());
         // Check first
         Wal wal = walerb.first();
+        final Wal first = wal;
         checkWal(wal);
         // Check get(lsn)
-        wal = walerb.get(wal.getLsn());
+        wal = walerb.get(first.getLsn());
         checkWal(wal);
 
         // Check by iterate(lsn)
-        Iterator<Wal> itr = walerb.iterator(wal.getLsn());
+        Iterator<Wal> itr = walerb.iterator(first.getLsn());
         startTime = System.currentTimeMillis();
         for (int i = 0; i < n; ++i) {
             asserts(itr.hasNext(), "Data lost at i " + i);
@@ -114,6 +115,30 @@ public class WalerFactoryTest extends Test {
         asserts (!itr.hasNext(), "Data too many");
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate-from-lsn %d items, time %dms", n, (endTime - startTime));
+
+        // Check by iterate(lsn, 0)
+        itr = walerb.iterator(first.getLsn(), 0);
+        startTime = System.currentTimeMillis();
+        for (int i = 0; i < n; ++i) {
+            asserts(itr.hasNext(), "Data lost at i " + i);
+            wal = itr.next();
+            checkWal(wal);
+        }
+        asserts (walerb.next(wal) == null, "Data too many");
+        endTime = System.currentTimeMillis();
+        IoUtils.info("Iterate-from-lsn-block %d items, time %dms", n, (endTime - startTime));
+
+        // Check by iterate(lsn, timeout)
+        itr = walerb.iterator(first.getLsn(), 1000);
+        startTime = System.currentTimeMillis();
+        for (int i = 0; i < n; ++i) {
+            asserts(itr.hasNext(), "Data lost at i " + i);
+            wal = itr.next();
+            checkWal(wal);
+        }
+        asserts (!itr.hasNext(), "Data too many");
+        endTime = System.currentTimeMillis();
+        IoUtils.info("Iterate-from-lsn-timeout %d items, time %dms", n, (endTime - startTime));
 
         // Check by iterate()
         itr = walerb.iterator();
