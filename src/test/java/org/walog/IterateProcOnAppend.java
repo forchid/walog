@@ -27,8 +27,6 @@ package org.walog;
 import org.walog.util.IoUtils;
 
 import java.io.IOException;
-import java.util.Iterator;
-import java.util.Random;
 
 public class IterateProcOnAppend {
 
@@ -62,34 +60,23 @@ public class IterateProcOnAppend {
     static void iterate(int appendItems, String dataDir) throws IOException {
         IoUtils.info("Open in data dir: %s", dataDir);
         Waler walerI = WalerFactory.open(dataDir);
-        long lsn = 0;
-        boolean once = false;
         int n = appendItems + 1;
-        Random rand = new Random();
-        Iterator<Wal> itr = walerI.iterator(lsn);
+        Wal wal = null;
+
         for (int i = 0; i < n; ++i) {
-            for (; !itr.hasNext();) {
-                IoUtils.debug("wait appender at i %d", i);
-                Test.sleep(rand.nextInt(100));
-
-                IoUtils.debug("re-iterate at i %d", i);
-                itr = walerI.iterator(lsn);
-                // Skip last item
-                if(once && itr.hasNext()) itr.next();
-
-                if (i >= appendItems) {
-                    IoUtils.info("complete");
-                    return;
-                }
+            if (i == 0) {
+                wal = walerI.first(0);
+            } else {
+                wal = walerI.next(wal, i < appendItems? 0: 10);
             }
-            Wal wal = itr.next();
-            lsn = wal.getLsn();
-            once = true;
-            String data = wal.toString();
-            String[] parts = data.split("=");
-            Test.asserts(parts.length == 2);
-            Test.asserts(Integer.parseInt(parts[1]) == i, "i = " +i);
+            if (i < appendItems) {
+                String data = wal.toString();
+                String[] parts = data.split("=");
+                Test.asserts(parts.length == 2);
+                Test.asserts(Integer.parseInt(parts[1]) == i, "i = " +i);
+            }
         }
+        Test.asserts(wal == null);
         IoUtils.info("complete");
 
         walerI.close();

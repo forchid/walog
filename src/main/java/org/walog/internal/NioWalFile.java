@@ -42,6 +42,7 @@ public class NioWalFile implements  AutoCloseable {
     protected static final String PROP_BLOCK_CACHE_SIZE = "org.walog.block.cacheSize";
     protected static final int BLOCK_CACHE_SIZE = getInteger(PROP_BLOCK_CACHE_SIZE, 16);
     protected static final int BLOCK_SIZE = 4 << 10;
+    protected static final int WAL_MIN_SIZE = 1 + 8;
 
     protected final File file;
     protected final long lsn;
@@ -193,7 +194,7 @@ public class NioWalFile implements  AutoCloseable {
      * @throws IOException if IO error
      */
     public SimpleWal get(final int offset) throws IOException {
-        if (offset >= size()) {
+        if (offset + WAL_MIN_SIZE > size()) {
             return null;
         }
 
@@ -331,7 +332,7 @@ public class NioWalFile implements  AutoCloseable {
 
     public void recovery() throws IOException {
         final long size = this.size();
-        if (size < 8L) {
+        if (size < WAL_MIN_SIZE) {
             this.chan.truncate(0L);
             return;
         }
@@ -359,7 +360,7 @@ public class NioWalFile implements  AutoCloseable {
         try {
             for (; offset < size; ) {
                 wal = get(offset);
-                offset += (wal.getHeadSize() + wal.getData().length + 4);
+                offset = wal.nextOffset();
             }
         } catch (final EOFException e) {
             final String message;

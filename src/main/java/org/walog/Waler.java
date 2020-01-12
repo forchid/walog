@@ -34,8 +34,6 @@ import java.util.Iterator;
  *
  */
 public interface Waler extends AutoCloseable {
-
-    long READ_POLL_TIMEOUT = Long.getLong("org.walog.readPollTimeout", 100L);
     
     /** Open the logger.
      *
@@ -61,6 +59,19 @@ public interface Waler extends AutoCloseable {
      * @throws IOException if IO error
      */
     Wal first() throws IOException;
+
+    /** Get current first log in this wal logger.
+     *
+     * @param timeout the wait timeout millisecond if has reached to the end of the last wal file.
+     *                1) The timeout bigger than 0, then waits the specified millisecond, or
+     *                there is a wal appended to the last wal file;
+     *                2) The timeout equal to 0, simply waits until there is a wal appended to
+     *                the last wal file;
+     *                3) The timeout less than 0, non-block and simple as first()
+     * @return the first log, or null if no any log, timeout, or interrupted
+     * @throws IOException if IO error
+     */
+    Wal first(long timeout) throws IOException;
 
     /** Get the log of the specified lsn.
      *

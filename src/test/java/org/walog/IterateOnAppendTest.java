@@ -27,6 +27,7 @@ package org.walog;
 import org.walog.util.IoUtils;
 import org.walog.util.Proc;
 import org.walog.util.Task;
+import org.walog.util.WalFileUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -127,45 +128,43 @@ public class IterateOnAppendTest extends Test {
             @Override
             public Void call() throws IOException {
                 int n = appendItems;
+                Wal wal = null;
                 for(int i = 0; i < n; ++i) {
-                    walerA.append(System.currentTimeMillis()+": i=" + i);
+                    wal = walerA.append(System.currentTimeMillis()+": i=" + i);
+                    asserts(wal != null);
                 }
-                IoUtils.debug("complete");
+                asserts(wal != null);
+
+                IoUtils.debug("complete: last offset %d", WalFileUtils.fileOffset(wal.getLsn()));
                 return null;
             }
         }, "appender");
 
         Task<Void> iterator = newTask(new Callable<Void>() {
             @Override
-            public Void call() {
-                long lsn = 0;
-                boolean once = false;
-                int n = appendItems + 1;
-                Random rand = new Random();
-                Iterator<Wal> itr = walerI.iterator(lsn);
-                for (int i = 0; i < n; ++i) {
-                    for (; !itr.hasNext();) {
-                        //IoUtils.debug("wait appender at i %d", i);
-                        sleep(rand.nextInt(100));
-
-                        //IoUtils.debug("re-iterate at i %d", i);
-                        itr = walerI.iterator(lsn);
-                        // Skip last item
-                        if(once && itr.hasNext()) itr.next();
-
-                        if (i >= appendItems) {
-                            IoUtils.debug("complete");
-                            return null;
-                        }
+            public Void call() throws IOException {
+                int n = appendItems + 1 /* test read timeout */;
+                Wal wal = null;
+                int i = 0;
+                for (; i < n;) {
+                    if (i == 0) {
+                        wal = walerI.first(0);
+                    } else {
+                        wal = walerI.next(wal, i < appendItems? 0: 100);
                     }
-                    Wal wal = itr.next();
-                    lsn = wal.getLsn();
-                    once = true;
-                    String data = wal.toString();
-                    String[] parts = data.split("=");
-                    asserts(parts.length == 2);
-                    asserts(Integer.parseInt(parts[1]) == i, "i = " +i);
+                    if (i < appendItems) {
+                        String data = wal.toString();
+                        String[] parts = data.split("=");
+                        asserts(parts.length == 2);
+                        asserts(Integer.parseInt(parts[1]) == i, "i = " +i);
+                    }
+                    ++i;
                 }
+
+                // Check
+                asserts(i == n);
+                asserts(wal == null);
+
                 IoUtils.debug("complete");
                 return null;
             }

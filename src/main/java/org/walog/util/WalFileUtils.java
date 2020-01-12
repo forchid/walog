@@ -144,6 +144,29 @@ public final class WalFileUtils {
         
         return lsn;
     }
+
+    public static boolean isWalFile(String filename) {
+        int len = filename.length();
+
+        // Check filename
+        if (len != 16 + EXT.length()) {
+            return false;
+        }
+        if (!filename.endsWith(EXT)) {
+            return false;
+        }
+        len -= EXT.length();
+
+        for (int i = 0; i < len; ++i) {
+            int c = filename.charAt(i);
+            if (c >= '0' && c <= '9' || c >= 'a' && c <= 'f'){
+                continue;
+            }
+            return false;
+        }
+
+        return true;
+    }
     
     public static String filename(long lsn) {
         final char[] hex = new char[16];
