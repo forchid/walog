@@ -65,8 +65,18 @@ public interface Waler extends AutoCloseable {
      * @param lsn target log LSN
      * @return the specified log, or null if not found
      * @throws IOException if IO error
+     * @throws IllegalArgumentException if the arg lsn is less than 0
      */
-    Wal get(long lsn) throws IOException;
+    Wal get(long lsn) throws IOException, IllegalArgumentException;
+
+    /** Get the next wal of the specified wal.
+     *
+     * @param wal the specified wal
+     * @return the next wal, or null if not found
+     * @throws IOException if IO error
+     * @throws IllegalArgumentException if the arg wal lsn is less than 0
+     */
+    Wal next(Wal wal) throws IOException, IllegalArgumentException;
 
     Iterator<Wal> iterator(long lsn);
 

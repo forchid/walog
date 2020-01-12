@@ -54,9 +54,17 @@ public class SimpleWal implements Wal {
         return WalFileUtils.fileOffset(this.lsn);
     }
 
-    public long nextLsn() {
+    public int nextOffset() {
         final int offset = getOffset();
-        final int nextOffset = offset + getHeadSize() + getData().length + 8;
+        int nextOffset = offset + getHeadSize() + getData().length + 8;
+        if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK) {
+            throw new IllegalStateException("offset full");
+        }
+        return nextOffset;
+    }
+
+    public long nextLsn() {
+        final int nextOffset = nextOffset();
         if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK) {
             throw new IllegalStateException("offset full");
         }

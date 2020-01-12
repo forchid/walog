@@ -75,7 +75,7 @@ public class WalerFactoryTest extends Test {
                         final int a = random.nextInt(i), b = random.nextInt(i);
                         final long cur = System.currentTimeMillis();
                         String data = cur+":"+a + "," + b + "," + (a + b);
-                        Wal wal = walera.append(data.getBytes());
+                        Wal wal = walera.append(data);
                         asserts( wal != null, "append wal failed");
                         if (i % 10000 == 0) {
                             walera.sync();
@@ -103,7 +103,7 @@ public class WalerFactoryTest extends Test {
         // Check-2
         wal = walerb.get(wal.getLsn());
         checkWal(wal);
-        // Check-3
+        // Check-3 by iterate()
         Iterator<Wal> itr = walerb.iterator(wal.getLsn());
         startTime = System.currentTimeMillis();
         for (int i = 0; i < n; ++i) {
@@ -118,12 +118,25 @@ public class WalerFactoryTest extends Test {
         }
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate %d items, time %dms", n, (endTime - startTime));
+        // Check-4 by next()
+        startTime = System.currentTimeMillis();
+        int i = 0;
+        wal = walerb.first();
+        Wal last;
+        do {
+            ++i;
+            checkWal(wal);
+            last = wal;
+        } while ((wal = walerb.next(wal)) != null);
+        asserts(i == n);
+        endTime = System.currentTimeMillis();
+        IoUtils.info("Next %d items, time %dms", n, (endTime - startTime));
 
         final File lastFile = WalFileUtils.lastFile(dirFile);
         if (lastFile == null) {
             throw new RuntimeException("Last wal file lost");
         }
-        asserts(walerb.purgeTo(wal.getLsn()));
+        asserts(walerb.purgeTo(last.getLsn()));
         asserts(walerb.clear());
 
         walerb.close();

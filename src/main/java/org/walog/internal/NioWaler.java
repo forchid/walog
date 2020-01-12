@@ -141,23 +141,57 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public Wal get(final long lsn) throws IOException {
+    public SimpleWal get(long lsn) throws IOException, IllegalArgumentException {
+        checkLsn(lsn);
         ensureOpen();
 
         // WAl lookup basic algorithm:
         // 1) Find the log living in which wal file
         // 2) Skip to the offset in file, then read it
-        if (lsn < 0L) {
-            throw new IllegalArgumentException("lsn must bigger than or equals 0");
-        }
-
-        final NioWalFile walFile = getWalFile(lsn);
+        NioWalFile walFile = getWalFile(lsn);
         if (walFile == null) {
             return null;
         }
 
-        final int offset = WalFileUtils.fileOffset(lsn);
+        int offset = WalFileUtils.fileOffset(lsn);
         return walFile.get(offset);
+    }
+
+    private void checkLsn(long lsn) throws IllegalArgumentException {
+        if (lsn < 0L) {
+            throw new IllegalArgumentException("lsn must be bigger than or equals 0: " + lsn);
+        }
+    }
+
+    @Override
+    public Wal next(Wal wal) throws IOException, IllegalArgumentException {
+        SimpleWal w;
+
+        if (wal instanceof SimpleWal) {
+            w = (SimpleWal)wal;
+            long nextLsn = w.nextLsn();
+            w = get(nextLsn);
+            if (w != null) {
+                return w;
+            }
+            NioWalFile walFile = getWalFile(nextLsn);
+            if (walFile == null) {
+                return null;
+            }
+            File file = walFile.getFile(), lastFile;
+            lastFile = WalFileUtils.lastFile(this.dir, file.getName());
+            if (file.equals(lastFile)) {
+                return null;
+            }
+            nextLsn = WalFileUtils.nextFileLsn(wal.getLsn());
+            return get(nextLsn);
+        } else {
+            w = get(wal.getLsn());
+            if (w == null) {
+                return null;
+            }
+            return next(w);
+        }
     }
 
     @Override
@@ -171,37 +205,38 @@ public class NioWaler implements Waler {
             return null;
         }
 
-        return getWalFile(WalFileUtils.lsn(file.getName()));
+        long fileLsn = WalFileUtils.lsn(file.getName());
+        return getWalFile(fileLsn);
     }
 
     /** Acquire the specified lsn wal file.
      *
-     * @param lsn wal serial number
+     * @param lsn wal serial number, or file lsn
      * @return the wal file, or null if the file not exits
      * @throws IOException if IO error
+     * @throws IllegalArgumentException if the arg lsn is less than 0
      */
-    protected NioWalFile getWalFile(final long lsn) throws IOException {
-        if (lsn < 0L) {
-            throw new IllegalArgumentException("lsn must bigger than or equals 0");
-        }
+    protected NioWalFile getWalFile(long lsn) throws IOException, IllegalArgumentException {
+        checkLsn(lsn);
+        long fileLsn = WalFileUtils.fileLsn(lsn);
 
-        NioWalFile walFile = this.walCache.get(lsn);
+        NioWalFile walFile = this.walCache.get(fileLsn);
         if (walFile != null) {
             return walFile;
         }
 
         synchronized (this.walCache) {
-            walFile = this.walCache.get(lsn);
+            walFile = this.walCache.get(fileLsn);
             if (walFile != null) {
                 return walFile;
             }
-
-            File file = new File(this.dir, WalFileUtils.filename(lsn));
+            String filename = WalFileUtils.filename(fileLsn);
+            File file = new File(this.dir, filename);
             if (!file.isFile()) {
                 return null;
             }
             walFile = new NioWalFile(file);
-            this.walCache.put(lsn, walFile);
+            this.walCache.put(fileLsn, walFile);
         }
 
         return walFile;

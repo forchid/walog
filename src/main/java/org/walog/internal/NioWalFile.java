@@ -79,6 +79,10 @@ public class NioWalFile implements  AutoCloseable {
         return this.file.getName();
     }
 
+    public File getFile() {
+        return this.file;
+    }
+
     protected ByteBuffer getBuffer(int minCapacity) {
         if (this.buffer == null) {
             final int cap = Math.max(minCapacity, BLOCK_SIZE);
