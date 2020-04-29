@@ -5,7 +5,19 @@
   <groupId>org.walog</groupId>
   <artifactId>walog</artifactId>
   <version>0.0.1</version>
-  <name>walog</name>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>8</source>
+                    <target>8</target>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+    <name>walog</name>
   <description>A simple WAL implementation</description>
   <url>https://github.com/little-pan/walog</url>
   

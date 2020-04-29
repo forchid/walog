@@ -355,7 +355,7 @@ public class NioWalFile implements  AutoCloseable {
             offset = IoUtils.readInt(buf);
             try {
                 Wal wal = get(offset);
-                IoUtils.info("walog last lsn 0x%x in '%s'", wal.getLsn(), this.file);
+                IoUtils.debug("walog last lsn 0x%x in '%s'", wal.getLsn(), this.file);
                 this.chan.position(size);
                 return;
             } catch (CorruptWalException |EOFException e) {

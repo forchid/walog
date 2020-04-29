@@ -29,10 +29,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Task<V> extends Thread {
 
+    static final ThreadLocal<Task<?>> localTask = new ThreadLocal<>();
+
     protected final AtomicBoolean flag;
     protected final Callable<V> task;
     protected volatile V result;
     protected volatile Throwable cause;
+    private volatile boolean completed;
 
     public Task(Callable<V> task) {
         this(task, null);
@@ -47,19 +50,27 @@ public class Task<V> extends Thread {
         this.flag = new AtomicBoolean();
     }
 
+    public static Task<?> currentTask() {
+        return localTask.get();
+    }
+
     @Override
     public void run() {
         try {
+            localTask.set(this);
             this.result = this.task.call();
             this.flag.set(true);
         } catch (final Throwable cause) {
-            this.flag.set(false);
             this.cause = cause;
+            this.flag.set(false);
+        } finally {
+            this.completed = true;
+            localTask.remove();
         }
     }
 
     public void check() {
-        if (!ok()) {
+        if (this.completed && !ok()) {
             throw new AssertionError(getName()+" failed", this.cause);
         }
     }

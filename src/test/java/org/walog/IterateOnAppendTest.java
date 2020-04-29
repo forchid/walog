@@ -63,8 +63,8 @@ public class IterateOnAppendTest extends Test {
             @Override
             public Void call() throws IOException {
                 int n = appendItems;
-                for(int i = 0; i < n; ++i) {
-                    waler.append(System.currentTimeMillis()+": i=" + i);
+                for (int i = 0; i < n; ++i) {
+                    waler.append(System.currentTimeMillis() + ": i=" + i);
                 }
                 IoUtils.debug("complete");
                 return null;
@@ -80,14 +80,14 @@ public class IterateOnAppendTest extends Test {
                 Random rand = new Random();
                 Iterator<Wal> itr = waler.iterator(lsn);
                 for (int i = 0; i < n; ++i) {
-                    for (; !itr.hasNext();) {
+                    for (; !itr.hasNext(); ) {
                         //IoUtils.debug("wait appender at i %d", i);
                         sleep(rand.nextInt(100));
 
                         //IoUtils.debug("re-iterate at i %d", i);
                         itr = waler.iterator(lsn);
                         // Skip last item
-                        if(once && itr.hasNext()) itr.next();
+                        if (once && itr.hasNext()) itr.next();
 
                         if (i >= appendItems) {
                             IoUtils.debug("complete");
@@ -100,7 +100,7 @@ public class IterateOnAppendTest extends Test {
                     String data = wal.toString();
                     String[] parts = data.split("=");
                     asserts(parts.length == 2);
-                    asserts(Integer.parseInt(parts[1]) == i, "i = " +i);
+                    asserts(Integer.parseInt(parts[1]) == i, "i = " + i);
                 }
                 IoUtils.debug("complete");
                 return null;
@@ -110,8 +110,8 @@ public class IterateOnAppendTest extends Test {
         iterator.start();
         appender.start();
 
-        join(iterator);
         join(appender);
+        join(iterator);
         iterator.check();
         appender.check();
 

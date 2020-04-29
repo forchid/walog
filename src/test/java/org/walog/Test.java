@@ -133,6 +133,21 @@ public abstract class Test {
         }
     }
 
+    public static void join(Task<?> t) {
+        try {
+            for(;;) {
+                t.check();
+                t.join(1000L);
+                if (!t.isAlive()) {
+                    t.check();
+                    break;
+                }
+            }
+        } catch (InterruptedException e) {
+            // Ignore
+        }
+    }
+
     public static void join(Proc p) {
         try {
             p.join();

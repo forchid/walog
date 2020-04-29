@@ -52,12 +52,14 @@ import static java.lang.Integer.getInteger;
  */
 class NioAppender extends Thread implements AutoCloseable {
 
-    static int QUEUE_SIZE     = Integer.getInteger("org.walog.append.queueSize", 512);
-    static int BATCH_SIZE     = Integer.getInteger("org.walog.append.batchSize", 128);
+    static int QUEUE_SIZE     = getInteger("org.walog.append.queueSize", 512);
+    static int BATCH_SIZE     = getInteger("org.walog.append.batchSize", 128);
     static int LOCK_TIMEOUT   = getInteger("org.walog.append.lockTimeout", 50000);
     static int APPEND_TIMEOUT = getInteger("org.walog.append.timeout", LOCK_TIMEOUT);
-    static int ASYNC_MODE     = Integer.getInteger("org.walog.append.asyncMode", 1);
-    static int AUTO_FLUSH     = Integer.getInteger("org.walog.append.autoFlush", 1);
+    static int ASYNC_MODE     = getInteger("org.walog.append.asyncMode", 1);
+    static int AUTO_FLUSH     = getInteger("org.walog.append.autoFlush", 1);
+    static int FLUSH_PERIOD   = getInteger("org.walog.append.flushPeriod", 100);
+    static int FLUSH_UNLOCK   = getInteger("org.walog.append.flushUnlock", 1);
 
     // Appender ID generator
     static final AtomicLong ID_GEN = new AtomicLong();
@@ -74,9 +76,9 @@ class NioAppender extends Thread implements AutoCloseable {
 
     // Basic resources
     private NioWalFile appendFile;
-    private RandomAccessFile appendLockFile;
-    private FileChannel appendLockChan;
-    private FileLock appendFileLock;
+    private RandomAccessFile lockFile;
+    private FileChannel lockChan;
+    private FileLock fileLock;
 
     protected boolean appendedFromSync;
     protected long lastSyncTime;
@@ -128,6 +130,8 @@ class NioAppender extends Thread implements AutoCloseable {
                     throw new IllegalStateException("Can't append again");
                 }
             }
+        } catch (FileLockTimeoutException e) {
+            // Acquire append file lock timeout
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -151,66 +155,67 @@ class NioAppender extends Thread implements AutoCloseable {
         IoUtils.info("wal appender runes in async mode");
 
         AppendItem<?> item = null;
-        boolean failed = true;
         try {
-            for (; isOpen(); ) {
-                int i = 0;
-                // Batch prepare
-                do {
-                    if (item != null && item.tryRun()) {
-                        handle(item, false);
-                        ++i;
-                    }
-                    item = null;
-                    if (i >= this.batchSize) {
-                        break;
-                    }
-
-                    // Try next item
-                    item = this.appendQueue.poll();
-                } while (item != null);
-
-                // Do batch append
-                doAppend();
-
-                // Try wait more
+            while (isOpen()) {
                 try {
+                    int i = 0;
+                    // Batch prepare
+                    do {
+                        if (item != null && item.tryRun()) {
+                            handle(item, false);
+                            ++i;
+                        }
+                        item = null;
+                        if (i >= this.batchSize) {
+                            break;
+                        }
+
+                        // Try next item
+                        item = this.appendQueue.poll();
+                    } while (item != null);
+
+                    // Do batch append
+                    doAppend();
+
+                    // Try wait more
                     item = this.appendQueue.poll(1000, MILLISECONDS);
-                    if (AUTO_FLUSH == 1 && this.appendedFromSync) {
-                        if (System.currentTimeMillis() - this.lastSyncTime >= 1000L) {
-                            IoUtils.debug("Auto flush start");
-                            recovery();
-                            this.appendFile.sync();
-                            this.appendedFromSync = false;
-                            this.lastSyncTime = System.currentTimeMillis();
-                            IoUtils.debug("Auto flush end");
+                    if (AUTO_FLUSH == 1 && this.appendedFromSync && (FLUSH_PERIOD <= 0 ||
+                            System.currentTimeMillis() - this.lastSyncTime >= FLUSH_PERIOD)) {
+                        IoUtils.debug("Auto flush start");
+                        recovery();
+                        this.appendFile.sync();
+                        this.appendedFromSync = false;
+                        this.lastSyncTime = System.currentTimeMillis();
+                        IoUtils.debug("Auto flush end");
+                        if (FLUSH_UNLOCK == 1) {
+                            releaseFileLock(this.fileLock);
                         }
                     }
-                } catch (final InterruptedException e) {
-                    // Note: shouldn't interrupt this appender thread
-                    // for NIO channel issue!
+                } catch (FileLockTimeoutException e) {
+                    if (item != null) {
+                        item.setResult(null);
+                    }
                 }
-            }
+            } // loop
+
             cancelQueuedItems();
-            failed = false;
         } catch (final Throwable cause) {
             setCauses(cause);
             if (item != null) {
                 item.setResult(cause);
             }
         } finally {
-            if (failed) {
-                close();
-            }
+            close();
         }
     }
 
-    protected void handle(AppendItem<?> item, boolean syncAppend) throws IOException {
-        boolean failed = true;
+    protected void handle(AppendItem<?> item, boolean syncAppend)
+            throws IOException, InterruptedException {
+        boolean fatal = true;
         try {
             switch (item.tag) {
                 case AppendItem.TAG_PAYLOAD:
-                    this.batchItems.add((AppendPayloadItem)item);
+                    this.batchItems.add((AppendPayloadItem) item);
                     if (syncAppend) {
                         doAppend();
                     }
@@ -219,7 +224,7 @@ class NioAppender extends Thread implements AutoCloseable {
                     sync(item);
                     break;
                 case AppendItem.TAG_PURGE:
-                    purgeTo((AppendPurgeToItem)item);
+                    purgeTo((AppendPurgeToItem) item);
                     break;
                 case AppendItem.TAG_CLEAR:
                     clear(item);
@@ -229,15 +234,18 @@ class NioAppender extends Thread implements AutoCloseable {
                     item.setResult(new IllegalArgumentException(message));
                     break;
             }
-            failed = false;
+            fatal = false;
+        } catch (InterruptedException | FileLockTimeoutException e) {
+            fatal = false;
+            throw e;
         } finally {
-            if (failed) {
+            if (fatal) {
                 close();
             }
         }
     }
 
-    protected void sync(AppendItem<?> item) throws IOException {
+    protected void sync(AppendItem<?> item) throws IOException, InterruptedException {
         doAppend();
         recovery();
 
@@ -245,6 +253,9 @@ class NioAppender extends Thread implements AutoCloseable {
         item.setResult(AppendItem.DUMMY_VALUE);
         this.appendedFromSync = false;
         this.lastSyncTime = System.currentTimeMillis();
+        if (FLUSH_UNLOCK == 1) {
+            releaseFileLock(this.fileLock);
+        }
     }
 
     protected void purgeTo(AppendPurgeToItem item) {
@@ -261,7 +272,7 @@ class NioAppender extends Thread implements AutoCloseable {
         item.setResult(Boolean.TRUE);
     }
 
-    protected void clear(AppendItem<?> item) throws IOException {
+    protected void clear(AppendItem<?> item) throws IOException, InterruptedException {
         doAppend();
         recovery();
 
@@ -289,7 +300,7 @@ class NioAppender extends Thread implements AutoCloseable {
         item.setResult(Boolean.TRUE);
     }
 
-    protected void doAppend() throws IOException {
+    protected void doAppend() throws IOException, InterruptedException {
         if (this.batchItems.size() == 0) {
             return;
         }
@@ -310,29 +321,33 @@ class NioAppender extends Thread implements AutoCloseable {
         this.appendedFromSync = true;
     }
 
-    protected void recovery() throws IOException {
-        if (this.appendFileLock != null && this.appendFileLock.isValid()) {
+    protected void recovery() throws IOException, InterruptedException {
+        if (this.fileLock != null && this.fileLock.isValid()) {
             return;
         }
 
-        if (this.appendLockFile == null) {
-            File lockFile = this.waler.newFile(".append.lock");
-            this.appendLockFile = new RandomAccessFile(lockFile, "rw");
+        if (this.lockFile == null) {
+            File lockFile = this.waler.newFile("append.lock");
+            this.lockFile = new RandomAccessFile(lockFile, "rw");
             boolean failed = true;
             try {
-                this.appendLockChan = this.appendLockFile.getChannel();
+                this.lockChan = this.lockFile.getChannel();
                 failed = false;
             } finally {
                 if (failed) {
-                    IoUtils.close(this.appendLockFile);
+                    IoUtils.close(this.lockFile);
                 }
             }
         }
 
-        final FileLock appendFileLock = appendFileLock();
-        final File dir = this.waler.getDirectory();
+        FileLock appendFileLock = null;
         boolean failed = true;
         try {
+            appendFileLock = acquireFileLock();
+            if (appendFileLock == null) {
+                throw new IllegalStateException("'append file lock' null");
+            }
+            final File dir = this.waler.getDirectory();
             File lastFile = WalFileUtils.lastFile(dir);
             if (lastFile == null) {
                 String name = WalFileUtils.filename(0L);
@@ -340,23 +355,20 @@ class NioAppender extends Thread implements AutoCloseable {
             }
             this.appendFile = new NioWalFile(lastFile);
             this.appendFile.recovery();
-            this.appendFileLock = appendFileLock;
+            this.fileLock = appendFileLock;
             failed = false;
         } finally {
             if (failed) {
-                IoUtils.close(appendFileLock);
-                IoUtils.close(this.appendFile);
-                this.appendFileLock = null;
-                this.appendFile = null;
+                releaseFileLock(appendFileLock);
             }
         }
     }
 
-    protected FileLock appendFileLock() throws IOException {
+    protected FileLock acquireFileLock() throws IOException, InterruptedException {
         final int lockTimeout = LOCK_TIMEOUT;
         if (lockTimeout <= 0) {
             for (;;) {
-                final FileLock lock = this.appendLockChan.lock();
+                final FileLock lock = this.lockChan.lock();
                 if (lock != null) {
                     return lock;
                 }
@@ -364,20 +376,30 @@ class NioAppender extends Thread implements AutoCloseable {
         }
 
         final long deadline = System.currentTimeMillis() + lockTimeout;
-        try {
-            for (;;) {
-                final FileLock lock = this.appendLockChan.tryLock();
-                if (lock != null) {
-                    return lock;
-                }
-
-                Thread.sleep(10L);
-                if (System.currentTimeMillis() > deadline) {
-                    return null;
-                }
+        for (;;) {
+            final FileLock lock = this.lockChan.tryLock();
+            if (lock != null) {
+                return lock;
             }
-        } catch (InterruptedException e) {
-            return null;
+
+            Thread.sleep(10L);
+            if (System.currentTimeMillis() > deadline) {
+                throw new FileLockTimeoutException("Acquire append file lock timeout");
+            }
+        }
+    }
+
+    private void releaseFileLock(FileLock fileLock) {
+        try {
+            IoUtils.close(this.appendFile);
+            this.appendFile = null;
+        } finally {
+            IoUtils.close(fileLock);
+            IoUtils.close(this.lockChan);
+            IoUtils.close(this.lockFile);
+            this.fileLock = null;
+            this.lockChan = null;
+            this.lockFile = null;
         }
     }
 
@@ -406,10 +428,7 @@ class NioAppender extends Thread implements AutoCloseable {
 
     @Override
     public void close() {
-        IoUtils.close(this.appendFile);
-        IoUtils.close(this.appendFileLock);
-        IoUtils.close(this.appendLockChan);
-        IoUtils.close(this.appendLockFile);
+        releaseFileLock(this.fileLock);
         this.open = false;
     }
 
