@@ -40,6 +40,7 @@ import static java.lang.Integer.getInteger;
 import static org.walog.util.WalFileUtils.lastFileLsn;
 
 public class NioWalFile implements  AutoCloseable {
+
     protected static final String PROP_BLOCK_CACHE_SIZE = "org.walog.block.cacheSize";
     protected static final int BLOCK_CACHE_SIZE = getInteger(PROP_BLOCK_CACHE_SIZE, 16);
     protected static final int BLOCK_SIZE = 4 << 10;
@@ -49,9 +50,9 @@ public class NioWalFile implements  AutoCloseable {
     protected final long lsn;
     protected final RandomAccessFile raf;
     protected final FileChannel chan;
+    protected final LruCache<Integer, Block> readCache;
     protected long filePos;
-    private ByteBuffer buffer;
-    protected final LruCache<Integer, Block> blockCache;
+    private ByteBuffer writeBuffer;
 
     private volatile boolean open;
 
@@ -63,7 +64,7 @@ public class NioWalFile implements  AutoCloseable {
         this.file  = file;
         this.lsn   = WalFileUtils.lsn(file.getName());
         this.raf   = new RandomAccessFile(file, "rw");
-        this.blockCache = new LruCache<>(blockCacheSize);
+        this.readCache = new LruCache<>(blockCacheSize);
 
         boolean failed = true;
         try {
@@ -85,36 +86,20 @@ public class NioWalFile implements  AutoCloseable {
         return this.file;
     }
 
-    protected ByteBuffer getBuffer(int minCapacity) {
-        if (this.buffer == null) {
-            final int cap = Math.max(minCapacity, BLOCK_SIZE);
-            return (this.buffer = ByteBuffer.allocate(cap));
-        }
-        if (this.buffer.remaining() >= minCapacity) {
-            return this.buffer;
+    protected ByteBuffer getWriteBuffer() {
+        if (this.writeBuffer == null) {
+            this.writeBuffer = ByteBuffer.allocate(BLOCK_SIZE);
         }
 
-        // Expand
-        minCapacity += this.buffer.position();
-        final int newCapacity = Math.max(minCapacity, this.buffer.capacity()<<1);
-        IoUtils.debug("Allocate a new buffer: capacity %d", newCapacity);
-        final ByteBuffer newBuffer = ByteBuffer.allocate(newCapacity);
-        this.buffer.flip();
-        newBuffer.put(this.buffer);
-        return (this.buffer = newBuffer);
+        return this.writeBuffer;
     }
 
-    protected void resetBuffer() {
-        final ByteBuffer buf = this.buffer;
-        if (buf == null) {
-            return;
+    protected void resetWriteBuffer() {
+        ByteBuffer buf = this.writeBuffer;
+
+        if (buf != null) {
+            buf.clear();
         }
-        if (buf.capacity() > WalFileUtils.BUFFER_SIZE) {
-            IoUtils.debug("Release a big buffer: %s", buf);
-            this.buffer = null;
-            return;
-        }
-        buf.clear();
     }
 
     public long getLsn() {
@@ -135,7 +120,7 @@ public class NioWalFile implements  AutoCloseable {
     protected byte getByte(final int offset) throws IOException {
         final int pageOffset = offset / BLOCK_SIZE;
         final int blockOffset= offset % BLOCK_SIZE;
-        Block block = this.blockCache.get(pageOffset);
+        Block block = this.readCache.get(pageOffset);
         ByteBuffer buf;
 
         if (block == null || (buf = block.buffer()) == null) {
@@ -147,7 +132,7 @@ public class NioWalFile implements  AutoCloseable {
             buf = ByteBuffer.allocate(Math.min(BLOCK_SIZE, rem));
             IoUtils.readFully(this.chan, buf, pos);
             if (buf.limit() == BLOCK_SIZE) {
-                this.blockCache.put(pageOffset, new Block(buf));
+                this.readCache.put(pageOffset, new Block(buf));
             }
         }
 
@@ -162,7 +147,7 @@ public class NioWalFile implements  AutoCloseable {
             throws IOException {
         final int pageOffset = offset / BLOCK_SIZE;
         final int blockOffset= offset % BLOCK_SIZE;
-        Block block = this.blockCache.get(pageOffset);
+        Block block = this.readCache.get(pageOffset);
         ByteBuffer buf;
 
         if (block == null || (buf = block.buffer()) == null) {
@@ -174,7 +159,7 @@ public class NioWalFile implements  AutoCloseable {
             buf = ByteBuffer.allocate(Math.min(BLOCK_SIZE, rem));
             IoUtils.readFully(this.chan, buf, pos);
             if (buf.limit() == BLOCK_SIZE) {
-                this.blockCache.put(pageOffset, new Block(buf));
+                this.readCache.put(pageOffset, new Block(buf));
             }
         }
 
@@ -237,8 +222,8 @@ public class NioWalFile implements  AutoCloseable {
 
         getBytes(offset + i, ia);
         i += ia.length;
-        final int checksum = IoUtils.readInt(ia);
-        if (checksum != IoUtils.getFletcher32(data)) {
+        final int chkSum = IoUtils.readInt(ia);
+        if (chkSum != IoUtils.getFletcher32(data)) {
             throw new CorruptWalException("Checksum error", this.file.getAbsolutePath(), offset);
         }
 
@@ -263,79 +248,108 @@ public class NioWalFile implements  AutoCloseable {
 
     public SimpleWal append(byte[] payload) throws IOException {
         final int length = payload.length;
-        final byte[] head;
-        int i = 0;
+        final int headSize;
+        final byte pfx;
 
         if (length >= 1 << 24) {
             throw new IllegalArgumentException("payload too big");
         }
-
         if (length >= 1 << 16) {
-            head = new byte[4];
-            head[i++] = (byte)0xfd;
-            head[i++] = (byte)(length);
-            head[i++] = (byte)(length >> 8);
-            head[i++] = (byte)(length >> 16);
+            headSize = 4;
+            pfx = (byte)0xfd;
         } else if (length >= 0xfb) {
-            head = new byte[3];
-            head[i++] = (byte)0xfc;
-            head[i++] = (byte)(length);
-            head[i++] = (byte)(length >> 8);
+            headSize = 3;
+            pfx = (byte)0xfc;
         } else {
-            head = new byte[1];
-            head[i++] = (byte)length;
+            headSize = 1;
+            pfx = (byte)length;
         }
-        final byte pfx = head[0];
-
-        final int checksum = IoUtils.getFletcher32(payload);
-        final int walSize  = i + payload.length + 8;
-        final ByteBuffer buffer = getBuffer(walSize);
-        buffer.put(head).put(payload);
-
+        // wal format: Length(var-int), Data, Offset(int), Data checksum(int)
+        final int walSize  = headSize + payload.length + 8;
         if (this.filePos + walSize > Wal.LSN_OFFSET_MASK) {
             throw new IOException(this.file.getAbsolutePath() + " full");
         }
 
         final int offset = (int)this.filePos;
-        int p = buffer.position();
-        IoUtils.writeInt(offset, buffer.array(), p);
-        buffer.position(p += 4);
-        IoUtils.writeInt(checksum, buffer.array(), p);
-        buffer.position(p +  4);
+        final int chkSum = IoUtils.getFletcher32(payload);
+        final ByteBuffer buffer = getWriteBuffer();
+        writeHeader(buffer, headSize, pfx, length);
+        write(buffer, payload);
+        writeInt(buffer, offset);
+        writeInt(buffer, chkSum);
         this.filePos += walSize;
 
         final long lsn = this.lsn | offset;
         return new SimpleWal(lsn, pfx, payload);
     }
 
-    protected int flush() throws IOException {
-        final ByteBuffer buffer = this.buffer;
+    private void writeHeader(ByteBuffer buffer, int headSize, byte pfx, int length)
+            throws IOException {
+
+        if (headSize == 1) {
+            write(buffer, (byte)length);
+        } else if (headSize == 3) {
+            write(buffer, pfx);
+            write(buffer, (byte)(length));
+            write(buffer, (byte)(length >> 8));
+        } else if (headSize == 4) {
+            write(buffer, pfx);
+            write(buffer, (byte)(length));
+            write(buffer, (byte)(length >> 8));
+            write(buffer, (byte)(length >> 16));
+        } else {
+            throw new IllegalArgumentException("headSize " + headSize);
+        }
+    }
+
+    protected void writeInt(ByteBuffer buffer, int i) throws IOException {
+        if (buffer.remaining() < 4) {
+            flush();
+        }
+
+        final int p = buffer.position();
+        IoUtils.writeInt(i, buffer.array(), p);
+        buffer.position(p + 4);
+    }
+
+    protected void write(ByteBuffer buffer, byte[] bytes) throws IOException {
+        for (int i = 0, n = bytes.length; i < n; ++i) {
+            write(buffer, bytes[i]);
+        }
+    }
+
+    protected void write(ByteBuffer buffer, byte b) throws IOException {
+        if (!buffer.hasRemaining()) {
+            flush();
+        }
+        buffer.put(b);
+    }
+
+    protected void flush() throws IOException {
+        final ByteBuffer buffer = this.writeBuffer;
         final int p = buffer.position();
         final int n = p / BLOCK_SIZE;
-        int lim = BLOCK_SIZE, blocks = 0;
+        int lim = BLOCK_SIZE;
 
         buffer.flip();
         for (int i = 0; i < n; ++i) {
             buffer.limit(lim);
-            for (; buffer.hasRemaining();) {
+            while (buffer.hasRemaining()) {
                 this.chan.write(buffer);
             }
             buffer.position(lim);
             lim += BLOCK_SIZE;
             buffer.limit(p);
-            ++blocks;
         }
 
         final int rem = p % BLOCK_SIZE;
         if (rem > 0) {
-            for (; buffer.hasRemaining();) {
+            while (buffer.hasRemaining()) {
                 this.chan.write(buffer);
             }
-            ++blocks;
         }
 
-        resetBuffer();
-        return blocks;
+        resetWriteBuffer();
     }
 
     public void recovery() throws IOException {
@@ -366,7 +380,7 @@ public class NioWalFile implements  AutoCloseable {
         // 2. Otherwise forward
         SimpleWal wal = null;
         try {
-            for (; offset < size; ) {
+            while (offset < size) {
                 wal = get(offset);
                 offset = wal.nextOffset();
             }
@@ -395,7 +409,7 @@ public class NioWalFile implements  AutoCloseable {
 
     @Override
     public void close()  {
-        IoUtils.close(this.blockCache);
+        IoUtils.close(this.readCache);
         IoUtils.close(this.chan);
         IoUtils.close(this.raf);
 

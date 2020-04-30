@@ -44,7 +44,6 @@ public final class WalFileUtils {
     public static final String EXT = ".wal";
     public static final int ROLL_SIZE;
     public static final int CACHE_SIZE;
-    public static final int BUFFER_SIZE;
 
     static {
         // rollSize
@@ -69,20 +68,6 @@ public final class WalFileUtils {
                 throw new RuntimeException(name+" must bigger than 0");
             }
             CACHE_SIZE = n;
-        }
-
-        // bufferSize
-        {
-            final String name = "org.walog.file.bufferSize";
-            final long n = UnitUtils.parseBytes(System.getProperty(name, "4m"));
-            if (n > Wal.LSN_OFFSET_MASK) {
-                throw new RuntimeException(name+" too big");
-            }
-            final int k = 4, minSize = k << 10;
-            if (n < minSize) {
-                throw new RuntimeException(name+" must bigger than or equal to " + k + "k");
-            }
-            BUFFER_SIZE = (int)n;
         }
     }
     
