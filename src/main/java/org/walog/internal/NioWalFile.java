@@ -33,13 +33,13 @@ import org.walog.util.WalFileUtils;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.lang.Integer.getInteger;
 import static org.walog.util.WalFileUtils.lastFileLsn;
 
-public class NioWalFile implements  AutoCloseable {
+public class NioWalFile implements  AutoCloseable, Releaseable {
 
     protected static final String PROP_BLOCK_CACHE_SIZE = "org.walog.block.cacheSize";
     protected static final int BLOCK_CACHE_SIZE = getInteger(PROP_BLOCK_CACHE_SIZE, 16);
@@ -52,9 +52,11 @@ public class NioWalFile implements  AutoCloseable {
     protected final FileChannel chan;
     protected final LruCache<Integer, Block> readCache;
     protected long filePos;
+    private final long initSize;
     private ByteBuffer writeBuffer;
 
     private volatile boolean open;
+    private final AtomicInteger refCount;
 
     public NioWalFile(File file) throws IOException {
         this(file, BLOCK_CACHE_SIZE);
@@ -64,11 +66,13 @@ public class NioWalFile implements  AutoCloseable {
         this.file  = file;
         this.lsn   = WalFileUtils.lsn(file.getName());
         this.raf   = new RandomAccessFile(file, "rw");
+        this.refCount  = new AtomicInteger();
         this.readCache = new LruCache<>(blockCacheSize);
 
         boolean failed = true;
         try {
             this.chan = this.raf.getChannel();
+            this.initSize = isLastFile()? -1: this.chan.size();
             this.open = true;
             failed = false;
         } finally {
@@ -107,7 +111,8 @@ public class NioWalFile implements  AutoCloseable {
     }
 
     public long size() throws IOException {
-        return this.chan.size();
+        long size = this.initSize;
+        return  (size == -1? this.chan.size(): size);
     }
 
     public boolean isLastFile() {
@@ -230,20 +235,14 @@ public class NioWalFile implements  AutoCloseable {
         return new SimpleWal(this.lsn | offset, (byte)p, data);
     }
 
-    public List<Wal> append(List<AppendPayloadItem> items) throws IOException {
-        final int n = items.size();
-        final List<Wal> results = new ArrayList<>(n);
-
+    public void append(List<AppendPayloadItem> items) throws IOException {
         this.filePos = this.chan.size();
         this.chan.position(this.filePos);
-        for (int i = 0; i < n; ++i) {
+        for (int i = 0, n = items.size(); i < n; ++i) {
             AppendPayloadItem item = items.get(i);
-            final Wal wal = append(item.payload);
-            results.add(wal);
+            item.wal = append(item.payload);
         }
         flush();
-
-        return results;
     }
 
     public SimpleWal append(byte[] payload) throws IOException {
@@ -414,6 +413,23 @@ public class NioWalFile implements  AutoCloseable {
         IoUtils.close(this.raf);
 
         this.open = false;
+    }
+
+    @Override
+    public void retain(int n) {
+        this.refCount.addAndGet(n);
+    }
+
+    @Override
+    public void retain() {
+        this.refCount.incrementAndGet();
+    }
+
+    @Override
+    public void release() {
+        if (this.refCount.decrementAndGet() <= 0) {
+            close();
+        }
     }
 
 }

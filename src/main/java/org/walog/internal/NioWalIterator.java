@@ -24,18 +24,16 @@
 
 package org.walog.internal;
 
-import org.walog.Wal;
+import org.walog.WalIterator;
 import org.walog.util.IoUtils;
 import org.walog.util.WalFileUtils;
-import static org.walog.util.WalFileUtils.*;
 
 import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-class NioWalIterator implements Iterator<Wal> {
+class NioWalIterator implements WalIterator {
 
     static final long LSN_UNDEFINED = -1L;
     static final long NOT_TIMEOUT = -1L;
@@ -47,6 +45,7 @@ class NioWalIterator implements Iterator<Wal> {
     protected SimpleWal wal, last;
     private boolean hasNextCalled;
     private boolean noNext;
+    private boolean open = true;
 
     public NioWalIterator(NioWaler waler) {
         this.waler = waler;
@@ -69,6 +68,10 @@ class NioWalIterator implements Iterator<Wal> {
 
     @Override
     public boolean hasNext() {
+        if (!this.open) {
+            throw new IllegalStateException("Iterator closed");
+        }
+
         this.hasNextCalled = true;
         if (this.noNext) {
             return false;
@@ -77,6 +80,7 @@ class NioWalIterator implements Iterator<Wal> {
             return true;
         }
 
+        boolean failed = false;
         try {
             if (this.timeout >= 0L) {
                 // timeout version
@@ -95,12 +99,14 @@ class NioWalIterator implements Iterator<Wal> {
                 return true;
             }
 
+            failed = true;
             if (this.walFile == null) {
                 // 1. Initialize lsn if undefined
                 if (this.lsn == LSN_UNDEFINED) {
                     this.wal = this.waler.first();
                     if (this.wal == null) {
                         this.noNext = true;
+                        failed = false;
                         return false;
                     }
                     this.lsn = this.wal.getLsn();
@@ -109,43 +115,62 @@ class NioWalIterator implements Iterator<Wal> {
                 this.walFile = this.waler.getWalFile(this.lsn);
                 if (this.walFile == null) {
                     this.noNext = true;
+                    failed = false;
                     return false;
                 }
                 if (this.wal != null) {
                     this.lsn = this.wal.nextLsn();
+                    failed = false;
                     return true;
                 }
             }
 
             this.wal = this.walFile.get(this.lsn);
             if (this.wal == null) {
+                this.walFile.release();
                 // Open next wal file
                 this.lsn = WalFileUtils.nextFileLsn(this.lsn);
                 this.walFile = this.waler.getWalFile(this.lsn);
                 if (this.walFile == null) {
                     this.noNext = true;
+                    failed = false;
                     return false;
                 }
-                this.wal = walFile.get(this.lsn);
+                this.wal = this.walFile.get(this.lsn);
             }
 
             if (this.wal != null) {
                 this.lsn = this.wal.nextLsn();
+                failed = false;
                 return true;
             }
 
             this.noNext = true;
+            this.walFile.release();
+            failed = false;
             return false;
         } catch (EOFException e) {
             if (this.walFile.isLastFile()) {
                 File file = this.walFile.getFile();
                 IoUtils.debug("Reach to the end of file '%s'", file);
                 this.noNext = true;
+                this.walFile.release();
+                failed = false;
                 return false;
             }
             throw new IllegalStateException(e);
         } catch (IOException e) {
             throw new IllegalStateException(e);
+        } finally {
+            if (this.noNext) {
+                this.open = false;
+            }
+            if (failed) {
+                this.open = false;
+                if (this.walFile != null) {
+                    this.walFile.release();
+                }
+            }
         }
     }
 
@@ -165,8 +190,16 @@ class NioWalIterator implements Iterator<Wal> {
     }
 
     @Override
-    public void remove() {
-        throw new UnsupportedOperationException();
+    public boolean isOpen() {
+        return this.open;
+    }
+
+    @Override
+    public void close() {
+        this.open = false;
+        if (this.walFile != null) {
+            this.walFile.release();
+        }
     }
 
 }

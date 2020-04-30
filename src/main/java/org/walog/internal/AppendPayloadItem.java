@@ -30,6 +30,8 @@ public class AppendPayloadItem extends AppendItem<Wal> {
 
     public final byte[] payload;
 
+    protected Wal wal;
+
     public AppendPayloadItem(NioAppender appender, byte[] payload) {
         super(TAG_PAYLOAD, appender);
         this.payload = payload;

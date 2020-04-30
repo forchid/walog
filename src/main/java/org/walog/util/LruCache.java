@@ -24,13 +24,16 @@
 
 package org.walog.util;
 
+import org.walog.internal.Releaseable;
+
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Map.*;
 
 public class LruCache<K, V extends AutoCloseable> implements AutoCloseable {
 
-    private final LinkedHashMap<K, V> cache;
+    private final Map<K, V> cache;
     private volatile boolean open;
 
     public LruCache() {
@@ -43,7 +46,7 @@ public class LruCache<K, V extends AutoCloseable> implements AutoCloseable {
             protected boolean removeEldestEntry(Entry<K, V> eldest) {
                 final boolean canRemoved = size() > capacity;
                 if (canRemoved) {
-                    IoUtils.close(eldest.getValue());
+                    release(eldest.getValue());
                 }
                 return canRemoved;
             }
@@ -53,38 +56,65 @@ public class LruCache<K, V extends AutoCloseable> implements AutoCloseable {
 
     public V get(K key) {
         checkOpen();
+
+        final V value;
         synchronized (this.cache) {
-            return this.cache.get(key);
+            value = this.cache.get(key);
+            if (value instanceof Releaseable) {
+                Releaseable rel = (Releaseable)value;
+                rel.retain();
+            }
         }
+
+        return value;
     }
 
     public V put(K key, V value) {
         checkOpen();
+
         final V old;
         synchronized (this.cache) {
             old = this.cache.put(key, value);
+            if (value instanceof Releaseable) {
+                Releaseable rel = (Releaseable)value;
+                rel.retain(2);
+            }
         }
-        IoUtils.close(old);
+        if (value != old) {
+            release(old);
+        }
+
         return old;
     }
 
     public V remove(K key) {
         checkOpen();
+
         final V old;
         synchronized (this.cache) {
             old = this.cache.remove(key);
         }
-        IoUtils.close(old);
+        release(old);
+
         return old;
     }
 
     public void clear() {
         synchronized (this.cache) {
-            final Iterator<Entry<K, V>> i = this.cache.entrySet().iterator();
-            for(; i.hasNext(); ) {
-                IoUtils.close(i.next().getValue());
-                i.remove();
+            Iterator<Entry<K, V>> it = this.cache.entrySet().iterator();
+            while (it.hasNext()) {
+                release(it.next().getValue());
+                it.remove();
             }
+        }
+    }
+
+    protected void release(V value) {
+        if (value instanceof Releaseable) {
+            Releaseable rel = (Releaseable) value;
+            rel.release();
+        } else {
+            IoUtils.close(value);
         }
     }
 

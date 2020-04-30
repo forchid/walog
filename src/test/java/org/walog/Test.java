@@ -41,7 +41,7 @@ public abstract class Test {
     
     protected final static File baseDir = new File(System.getProperty("user.dir"));
     protected final static File testDir = new File(baseDir, "temp");
-    protected static final int iterates = Integer.getInteger("org.walog.test.iterates", 3);
+    protected static final int iterates = Integer.getInteger("org.walog.test.iterates", 2);
 
     protected final int iterate;
     

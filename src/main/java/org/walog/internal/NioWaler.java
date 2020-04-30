@@ -33,6 +33,7 @@ import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import org.walog.Wal;
+import org.walog.WalIterator;
 import org.walog.Waler;
 import org.walog.util.IoUtils;
 import org.walog.util.LruCache;
@@ -148,6 +149,8 @@ public class NioWaler implements Waler {
                 return null;
             }
             throw e;
+        } finally {
+            walFile.release();
         }
     }
 
@@ -220,6 +223,8 @@ public class NioWaler implements Waler {
                 return null;
             }
             throw e;
+        } finally {
+            walFile.release();
         }
     }
 
@@ -299,6 +304,7 @@ public class NioWaler implements Waler {
                 return null;
             } finally {
                 IoUtils.close(watchService);
+                walFile.release();
             }
         } else {
             w = get(wal.getLsn());
@@ -328,17 +334,17 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public Iterator<Wal> iterator() {
+    public WalIterator iterator() {
         return new NioWalIterator(this);
     }
 
     @Override
-    public Iterator<Wal> iterator(long lsn) throws IllegalArgumentException {
+    public WalIterator iterator(long lsn) throws IllegalArgumentException {
         return new NioWalIterator(this, lsn);
     }
 
     @Override
-    public Iterator<Wal> iterator(long lsn, long timeout) throws IllegalArgumentException {
+    public WalIterator iterator(long lsn, long timeout) throws IllegalArgumentException {
         return new NioWalIterator(this, lsn, timeout);
     }
 

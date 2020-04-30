@@ -30,7 +30,6 @@ import org.walog.util.WalFileUtils;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.Random;
 import java.util.concurrent.Callable;
 
@@ -51,6 +50,11 @@ public class WalerFactoryTest extends Test {
 
     @Override
     protected void doTest() throws IOException {
+        // Test multi-thread read caches
+        final String cacheSizeProp = "org.walog.file.cacheSize";
+        final String oldCacheSize = System.getProperty(cacheSizeProp);
+        System.setProperty(cacheSizeProp, "2");
+
         final File dirFile = getDir();
         // 10 million:
         // 2020-01-02 sync append mode:  1   thread  append 35758ms, iterate 9353ms
@@ -59,11 +63,11 @@ public class WalerFactoryTest extends Test {
         // 2020-01-04 async append mode: 10  threads append 39339ms, iterate 8713ms
         // 2020-01-04 async append mode: 200 threads append 36877ms, iterate 9007ms
         // 2020-01-04 async append mode: 250 threads append 38148ms, iterate 8686ms
-        final int n = 10_000_000, c = 10, step = n / c;
+        int n = 10_000_000, c = 10, step = n / c;
         
         final Waler walera = WalerFactory.open(dirFile);
         long startTime = System.currentTimeMillis();
-        final Task<?>[] workers = new Task[c];
+        Task<?>[] workers = new Task[c];
         for (int i = 0, m = 0; i < c; ++i) {
             final int s = m + step, e = s + step;
             m = e;
@@ -92,7 +96,7 @@ public class WalerFactoryTest extends Test {
             t.check();
         }
         long endTime = System.currentTimeMillis();
-        IoUtils.info("Append %d items, time %dms", n, (endTime - startTime));
+        IoUtils.info("Append %d items, time %dms, threads %d", n, (endTime - startTime), c);
         walera.close();
 
         final Waler walerb = WalerFactory.open(dirFile.getAbsolutePath());
@@ -104,26 +108,44 @@ public class WalerFactoryTest extends Test {
         wal = walerb.get(first.getLsn());
         checkWal(wal);
 
-        // Check by iterate(lsn)
-        Iterator<Wal> itr = walerb.iterator(first.getLsn());
+        // Check by iterate(lsn) - multi-thread
+        c = 20;
+        workers = new Task[c];
         startTime = System.currentTimeMillis();
-        for (int i = 0; i < n; ++i) {
-            asserts(itr.hasNext(), "Data lost at i " + i);
-            wal = itr.next();
-            checkWal(wal);
+        for (int i = 0; i < c; ++i) {
+            Task<Void> t = newTask(new Callable<Void>() {
+                @Override
+                public Void call() {
+                    try(WalIterator itr = walerb.iterator(first.getLsn())) {
+                        for (int i = 0; i < n; ++i) {
+                            asserts(itr.hasNext(), "Data lost at i " + i);
+                            Wal wal = itr.next();
+                            checkWal(wal);
+                        }
+                        asserts(!itr.hasNext(), "Data too many");
+                    }
+                    return null;
+                }
+            });
+            workers[i] = t;
+            t.start();
         }
-        asserts (!itr.hasNext(), "Data too many");
+        for (final Task<?> t: workers) {
+            join(t);
+            t.check();
+        }
         endTime = System.currentTimeMillis();
-        IoUtils.info("Iterate-from-lsn %d items, time %dms", n, (endTime - startTime));
+        IoUtils.info("Iterate-from-lsn %d items, time %dms, threads %d", n * c, (endTime - startTime), c);
 
         // Check by iterate(lsn, 0)
-        itr = walerb.iterator(first.getLsn(), 0);
+        WalIterator itr = walerb.iterator(first.getLsn(), 0);
         startTime = System.currentTimeMillis();
         for (int i = 0; i < n; ++i) {
             asserts(itr.hasNext(), "Data lost at i " + i);
             wal = itr.next();
             checkWal(wal);
         }
+        itr.close();
         asserts (walerb.next(wal) == null, "Data too many");
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate-from-lsn-block %d items, time %dms", n, (endTime - startTime));
@@ -137,6 +159,7 @@ public class WalerFactoryTest extends Test {
             checkWal(wal);
         }
         asserts (!itr.hasNext(), "Data too many");
+        itr.close();
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate-from-lsn-timeout %d items, time %dms", n, (endTime - startTime));
 
@@ -149,6 +172,7 @@ public class WalerFactoryTest extends Test {
             checkWal(wal);
         }
         asserts (!itr.hasNext(), "Data too many");
+        itr.close();
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate %d items, time %dms", n, (endTime - startTime));
 
@@ -188,6 +212,9 @@ public class WalerFactoryTest extends Test {
         asserts(walerb.clear());
 
         walerb.close();
+        if (oldCacheSize != null) {
+            System.setProperty(cacheSizeProp, oldCacheSize);
+        }
     }
 
     protected void checkWal(Wal wal) {

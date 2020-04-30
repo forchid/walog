@@ -31,7 +31,6 @@ import org.walog.util.WalFileUtils;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.Random;
 import java.util.concurrent.Callable;
 
@@ -78,7 +77,7 @@ public class IterateOnAppendTest extends Test {
                 boolean once = false;
                 int n = appendItems + 1;
                 Random rand = new Random();
-                Iterator<Wal> itr = waler.iterator(lsn);
+                WalIterator itr = waler.iterator(lsn);
                 for (int i = 0; i < n; ++i) {
                     for (; !itr.hasNext(); ) {
                         //IoUtils.debug("wait appender at i %d", i);
@@ -95,6 +94,7 @@ public class IterateOnAppendTest extends Test {
                         }
                     }
                     Wal wal = itr.next();
+                    itr.close();
                     lsn = wal.getLsn();
                     once = true;
                     String data = wal.toString();

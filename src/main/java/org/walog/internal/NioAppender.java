@@ -24,7 +24,6 @@
 
 package org.walog.internal;
 
-import org.walog.Wal;
 import org.walog.util.IoUtils;
 import org.walog.util.WalFileUtils;
 
@@ -317,14 +316,14 @@ class NioAppender extends Thread implements AutoCloseable {
             rollFile();
         }
 
-        final List<AppendPayloadItem> items = this.batchItems;
-        final List<Wal> results = this.appendFile.append(items);
-        final int n = items.size();
-        for (int i = 0; i < n; ++i) {
+        List<AppendPayloadItem> items = this.batchItems;
+        this.appendFile.append(items);
+        for (int i = 0, n = items.size(); i < n; ++i) {
             AppendPayloadItem item = items.get(i);
-            item.setResult(results.get(i));
+            item.setResult(item.wal);
         }
         items.clear();
+
         this.appended = true;
     }
 
