@@ -240,7 +240,9 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         this.chan.position(this.filePos);
         for (int i = 0, n = items.size(); i < n; ++i) {
             AppendPayloadItem item = items.get(i);
-            item.wal = append(item.payload);
+            if (!item.isCompleted()) {
+                item.wal = append(item.payload);
+            }
         }
         flush();
     }

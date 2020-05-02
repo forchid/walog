@@ -61,11 +61,12 @@ public class IterateOnAppendTest extends Test {
         Task<Void> appender = newTask(new Callable<Void>() {
             @Override
             public Void call() throws IOException {
-                int n = appendItems;
-                for (int i = 0; i < n; ++i) {
-                    waler.append(System.currentTimeMillis() + ": i=" + i);
+                Wal wal = null;
+                for (int i = 0; i < appendItems; ++i) {
+                    wal = waler.append(System.currentTimeMillis() + ": i=" + i);
+                    asserts(wal != null, "Append timeout");
                 }
-                IoUtils.debug("complete");
+                IoUtils.debug("complete: last wal %s", wal);
                 return null;
             }
         }, "appender");
@@ -78,32 +79,36 @@ public class IterateOnAppendTest extends Test {
                 int n = appendItems + 1;
                 Random rand = new Random();
                 WalIterator itr = waler.iterator(lsn);
-                for (int i = 0; i < n; ++i) {
-                    for (; !itr.hasNext(); ) {
-                        //IoUtils.debug("wait appender at i %d", i);
-                        sleep(rand.nextInt(100));
+                try {
+                    Wal wal = null;
+                    for (int i = 0; i < n; ++i) {
+                        for (; !itr.hasNext(); ) {
+                            //IoUtils.debug("wait appender at i %d", i);
+                            sleep(rand.nextInt(100));
 
-                        //IoUtils.debug("re-iterate at i %d", i);
-                        itr = waler.iterator(lsn);
-                        // Skip last item
-                        if (once && itr.hasNext()) itr.next();
+                            //IoUtils.debug("re-iterate at i %d", i);
+                            itr = waler.iterator(lsn);
+                            // Skip last item
+                            if (once && itr.hasNext()) itr.next();
 
-                        if (i >= appendItems) {
-                            IoUtils.debug("complete");
-                            return null;
+                            if (i >= appendItems) {
+                                IoUtils.debug("complete: last wal %s", wal);
+                                return null;
+                            }
                         }
+                        wal = itr.next();
+                        lsn = wal.getLsn();
+                        once = true;
+                        String data = wal.toString();
+                        String[] parts = data.split("=");
+                        asserts(parts.length == 2);
+                        asserts(Integer.parseInt(parts[1]) == i, "i = " + i);
                     }
-                    Wal wal = itr.next();
-                    itr.close();
-                    lsn = wal.getLsn();
-                    once = true;
-                    String data = wal.toString();
-                    String[] parts = data.split("=");
-                    asserts(parts.length == 2);
-                    asserts(Integer.parseInt(parts[1]) == i, "i = " + i);
+                    IoUtils.debug("complete: last wal %s", wal);
+                    return null;
+                } finally {
+                    IoUtils.close(itr);
                 }
-                IoUtils.debug("complete");
-                return null;
             }
         }, "iterator");
 

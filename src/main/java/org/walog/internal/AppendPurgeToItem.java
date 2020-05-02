@@ -28,8 +28,8 @@ public class AppendPurgeToItem extends AppendItem<Boolean> {
 
     public final String filename;
 
-    public AppendPurgeToItem(NioAppender appender, String filename) {
-        super(TAG_PURGE, appender);
+    public AppendPurgeToItem(String filename) {
+        super(TAG_PURGE);
         this.filename = filename;
     }
 

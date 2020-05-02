@@ -33,19 +33,20 @@ public class AppendItem<V> {
     public static final int TAG_SYNC    = 0x02;
     public static final int TAG_PURGE   = 0x04;
     public static final int TAG_CLEAR   = 0x08;
+    public static final int TAG_END     = 0x10;
 
     public static final Object DUMMY_VALUE = new Object();
+    static final AppendItem<?> END_ITEM = new AppendItem<>(TAG_END);
 
     public final int tag;
-    protected final NioAppender appender;
+    long expiryTime;
 
     // Simple future
     private final AtomicInteger state;
     private V result;
     private Throwable cause;
 
-    public AppendItem(int tag, NioAppender appender) {
-        this.appender = appender;
+    public AppendItem(int tag) {
         this.tag = tag;
         this.state = new AtomicInteger(0);
     }
@@ -72,6 +73,7 @@ public class AppendItem<V> {
         return setResult(null, cause);
     }
 
+    @SuppressWarnings("unchecked")
     public synchronized boolean setResult(Object result, Throwable cause) {
         final boolean b;
 
@@ -94,7 +96,7 @@ public class AppendItem<V> {
     public synchronized V get() throws IOException {
         for (;;) {
             try {
-                for (; this.state.get() < 2; ) {
+                while (!isCompleted()) {
                     this.wait();
                 }
                 if (this.cause != null) {
@@ -119,6 +121,10 @@ public class AppendItem<V> {
                 }
             }
         }
+    }
+
+    public boolean isCompleted() {
+        return (this.state.get() >= 2);
     }
 
 }

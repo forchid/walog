@@ -29,7 +29,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import org.walog.Wal;
@@ -104,8 +103,8 @@ public class NioWaler implements Waler {
         if (copy) {
             payload = Arrays.copyOf(payload, payload.length);
         }
+        final AppendPayloadItem item = new AppendPayloadItem(payload);
         final NioAppender appender = getAppender();
-        final AppendPayloadItem item = new AppendPayloadItem(appender, payload);
         return appender.append(item);
     }
 
@@ -397,7 +396,7 @@ public class NioWaler implements Waler {
         ensureOpen();
 
         final NioAppender appender = getAppender();
-        item = new AppendPurgeToItem(appender, filename);
+        item = new AppendPurgeToItem(filename);
         return appender.append(item);
     }
 
@@ -412,7 +411,7 @@ public class NioWaler implements Waler {
         ensureOpen();
 
         final NioAppender appender = getAppender();
-        item = new AppendItem<>(AppendItem.TAG_CLEAR, appender);
+        item = new AppendItem<>(AppendItem.TAG_CLEAR);
         return appender.append(item);
     }
 
@@ -422,7 +421,7 @@ public class NioWaler implements Waler {
         ensureOpen();
 
         final NioAppender appender = getAppender();
-        item = new AppendItem<>(AppendItem.TAG_SYNC, appender);
+        item = new AppendItem<>(AppendItem.TAG_SYNC);
         appender.append(item);
     }
 

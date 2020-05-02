@@ -68,16 +68,15 @@ class NioWalIterator implements WalIterator {
 
     @Override
     public boolean hasNext() {
-        if (!this.open) {
-            throw new IllegalStateException("Iterator closed");
-        }
-
         this.hasNextCalled = true;
         if (this.noNext) {
             return false;
         }
         if (this.wal != null) {
             return true;
+        }
+        if (!this.open) {
+            throw new IllegalStateException("Wal iterator closed");
         }
 
         boolean failed = false;
@@ -146,7 +145,6 @@ class NioWalIterator implements WalIterator {
             }
 
             this.noNext = true;
-            this.walFile.release();
             failed = false;
             return false;
         } catch (EOFException e) {
@@ -154,7 +152,6 @@ class NioWalIterator implements WalIterator {
                 File file = this.walFile.getFile();
                 IoUtils.debug("Reach to the end of file '%s'", file);
                 this.noNext = true;
-                this.walFile.release();
                 failed = false;
                 return false;
             }
@@ -162,14 +159,8 @@ class NioWalIterator implements WalIterator {
         } catch (IOException e) {
             throw new IllegalStateException(e);
         } finally {
-            if (this.noNext) {
-                this.open = false;
-            }
-            if (failed) {
-                this.open = false;
-                if (this.walFile != null) {
-                    this.walFile.release();
-                }
+            if (this.noNext || failed) {
+                close();
             }
         }
     }
@@ -196,10 +187,11 @@ class NioWalIterator implements WalIterator {
 
     @Override
     public void close() {
-        this.open = false;
         if (this.walFile != null) {
             this.walFile.release();
         }
+        this.noNext = true;
+        this.open = false;
     }
 
 }
