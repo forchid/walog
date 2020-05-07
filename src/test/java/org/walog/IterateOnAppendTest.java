@@ -60,11 +60,11 @@ public class IterateOnAppendTest extends Test {
 
         Task<Void> appender = newTask(new Callable<Void>() {
             @Override
-            public Void call() throws IOException {
+            public Void call()  {
                 Wal wal = null;
                 for (int i = 0; i < appendItems; ++i) {
                     wal = waler.append(System.currentTimeMillis() + ": i=" + i);
-                    asserts(wal != null, "Append timeout");
+                    asserts(wal != null);
                 }
                 IoUtils.debug("complete: last wal %s", wal);
                 return null;
@@ -131,7 +131,7 @@ public class IterateOnAppendTest extends Test {
 
         Task<Void> appender = newTask(new Callable<Void>() {
             @Override
-            public Void call() throws IOException {
+            public Void call() {
                 int n = appendItems;
                 Wal wal = null;
                 for(int i = 0; i < n; ++i) {
@@ -147,7 +147,7 @@ public class IterateOnAppendTest extends Test {
 
         Task<Void> iterator = newTask(new Callable<Void>() {
             @Override
-            public Void call() throws IOException {
+            public Void call() {
                 int n = appendItems + 1 /* test read timeout */;
                 Wal wal = null;
                 int i = 0;
@@ -155,7 +155,12 @@ public class IterateOnAppendTest extends Test {
                     if (i == 0) {
                         wal = walerI.first(0);
                     } else {
-                        wal = walerI.next(wal, i < appendItems? 0: 100);
+                        try {
+                            wal = walerI.next(wal, i < appendItems ? 0 : 100);
+                        } catch (TimeoutWalException e) {
+                            // pass
+                            wal = null;
+                        }
                     }
                     if (i < appendItems) {
                         String data = wal.toString();
@@ -194,10 +199,11 @@ public class IterateOnAppendTest extends Test {
 
         Task<Void> appender = newTask(new Callable<Void>() {
             @Override
-            public Void call() throws IOException {
+            public Void call() {
                 int n = appendItems;
                 for(int i = 0; i < n; ++i) {
-                    walerA.append(System.currentTimeMillis()+": i=" + i);
+                    Wal wal = walerA.append(System.currentTimeMillis()+": i=" + i);
+                    asserts(wal != null);
                 }
                 IoUtils.debug("complete");
                 return null;

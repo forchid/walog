@@ -1,10 +1,14 @@
 package org.walog;
 
-public interface WalIterator extends AutoCloseable {
+import java.util.Iterator;
 
-    boolean hasNext();
+public interface WalIterator extends AutoCloseable, Iterator<Wal> {
 
-    Wal next();
+    @Override
+    boolean hasNext() throws WalException;
+
+    @Override
+    Wal next() throws WalException;
 
     boolean isOpen();
 

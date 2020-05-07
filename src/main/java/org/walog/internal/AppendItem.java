@@ -24,6 +24,9 @@
 
 package org.walog.internal;
 
+import org.walog.InterruptedWalException;
+import org.walog.WalException;
+
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -93,7 +96,7 @@ public class AppendItem<V> {
         return b;
     }
 
-    public synchronized V get() throws IOException {
+    public synchronized V get() throws IOException, WalException {
         for (;;) {
             try {
                 while (!isCompleted()) {
@@ -106,7 +109,8 @@ public class AppendItem<V> {
             } catch (final InterruptedException e) {
                 if (this.cancel()) {
                     // Interrupted before appender handles it
-                    return null;
+                    Thread.currentThread().interrupt();
+                    throw new InterruptedWalException("Wait for append result interrupted", e);
                 }
                 // Ignore after appender handling or handled it
             } catch (final Throwable e) {
@@ -117,7 +121,7 @@ public class AppendItem<V> {
                 } else if (e instanceof Error){
                     throw (Error)e;
                 } else {
-                    throw new RuntimeException(e);
+                    throw new WalException("Wait for append result failed", e);
                 }
             }
         }

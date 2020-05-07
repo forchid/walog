@@ -226,7 +226,6 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         }
 
         getBytes(offset + i, ia);
-        i += ia.length;
         final int chkSum = IoUtils.readInt(ia);
         if (chkSum != IoUtils.getFletcher32(data)) {
             throw new CorruptWalException("Checksum error", this.file.getAbsolutePath(), offset);
@@ -238,8 +237,7 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
     public void append(List<AppendPayloadItem> items) throws IOException {
         this.filePos = this.chan.size();
         this.chan.position(this.filePos);
-        for (int i = 0, n = items.size(); i < n; ++i) {
-            AppendPayloadItem item = items.get(i);
+        for (final AppendPayloadItem item : items) {
             if (!item.isCompleted()) {
                 item.wal = append(item.payload);
             }
@@ -314,8 +312,8 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
     }
 
     protected void write(ByteBuffer buffer, byte[] bytes) throws IOException {
-        for (int i = 0, n = bytes.length; i < n; ++i) {
-            write(buffer, bytes[i]);
+        for (final byte b : bytes) {
+            write(buffer, b);
         }
     }
 

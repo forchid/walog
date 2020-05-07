@@ -24,6 +24,8 @@
 
 package org.walog.internal;
 
+import org.walog.IOWalException;
+import org.walog.WalException;
 import org.walog.WalIterator;
 import org.walog.util.IoUtils;
 import org.walog.util.WalFileUtils;
@@ -67,7 +69,7 @@ class NioWalIterator implements WalIterator {
     }
 
     @Override
-    public boolean hasNext() {
+    public boolean hasNext() throws WalException {
         this.hasNextCalled = true;
         if (this.noNext) {
             return false;
@@ -155,9 +157,9 @@ class NioWalIterator implements WalIterator {
                 failed = false;
                 return false;
             }
-            throw new IllegalStateException(e);
+            throw new IOWalException(e);
         } catch (IOException e) {
-            throw new IllegalStateException(e);
+            throw new IOWalException(e);
         } finally {
             if (this.noNext || failed) {
                 close();

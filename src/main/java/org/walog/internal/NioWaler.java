@@ -31,9 +31,7 @@ import java.nio.file.*;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
-import org.walog.Wal;
-import org.walog.WalIterator;
-import org.walog.Waler;
+import org.walog.*;
 import org.walog.util.IoUtils;
 import org.walog.util.LruCache;
 import org.walog.util.WalFileUtils;
@@ -63,14 +61,14 @@ public class NioWaler implements Waler {
     }
     
     @Override
-    public void open() throws IOException {
+    public void open() throws WalException {
         if (isOpen()) {
             return;
         }
         
         final File dir = this.dir;
         if (!dir.isDirectory() && !dir.mkdir()) {
-            throw new IOException("Can't create walog directory: " + dir);
+            throw new IOWalException("Can't create walog directory: " + dir);
         }
         this.open = true;
     }
@@ -84,26 +82,26 @@ public class NioWaler implements Waler {
     }
     
     @Override
-    public Wal append(byte[] payload) throws IOException {
-        return append(payload, true);
+    public Wal append(byte[] log) throws WalException {
+        return append(log, true);
     }
 
     @Override
-    public Wal append(byte[] payload, int offset, int length) throws IOException {
-        return append(Arrays.copyOfRange(payload, offset, offset + length), false);
+    public Wal append(byte[] log, int offset, int length) throws WalException {
+        return append(Arrays.copyOfRange(log, offset, offset + length), false);
     }
 
     @Override
-    public Wal append(String payload) throws IOException {
-        return append(payload.getBytes(Wal.CHARSET), false);
+    public Wal append(String log) throws WalException {
+        return append(log.getBytes(Wal.CHARSET), false);
     }
 
-    protected Wal append(byte[] payload, boolean copy) throws IOException {
+    protected Wal append(byte[] log, boolean copy) throws WalException {
         ensureOpen();
         if (copy) {
-            payload = Arrays.copyOf(payload, payload.length);
+            log = Arrays.copyOf(log, log.length);
         }
-        final AppendPayloadItem item = new AppendPayloadItem(payload);
+        final AppendPayloadItem item = new AppendPayloadItem(log);
         final NioAppender appender = getAppender();
         return appender.append(item);
     }
@@ -132,29 +130,34 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public SimpleWal first() throws IOException {
+    public SimpleWal first() throws WalException {
         ensureOpen();
 
-        final NioWalFile walFile = getFirstWalFile();
-        if (walFile == null) {
-            return null;
-        }
-
+        NioWalFile walFile = null;
         try {
+            walFile = getFirstWalFile();
+            if (walFile == null) {
+                return null;
+            }
+
             return walFile.get(0);
         } catch (EOFException e) {
             // No more or partial wal
-            if (walFile.isLastFile()) {
+            if (walFile != null && walFile.isLastFile()) {
                 return null;
             }
-            throw e;
+            throw new IOWalException(e);
+        } catch (IOException e) {
+            throw new IOWalException(e);
         } finally {
-            walFile.release();
+            if (walFile != null) {
+                walFile.release();
+            }
         }
     }
 
     @Override
-    public SimpleWal first(long timeout) throws IOException {
+    public SimpleWal first(final long timeout) throws WalException {
         SimpleWal wal = first();
         if (wal != null || timeout < 0L) {
             return wal;
@@ -162,6 +165,7 @@ public class NioWaler implements Waler {
 
         WatchService watchService = regWatchService();
         try {
+            long remain = timeout;
             for (;;) {
                 wal = first();
                 if (wal != null) {
@@ -172,10 +176,10 @@ public class NioWaler implements Waler {
                     watchKey = watchPoll(watchService, timeout);
                 } else {
                     long cur = System.currentTimeMillis();
-                    watchKey = watchPoll(watchService, timeout);
-                    timeout -= System.currentTimeMillis() - cur;
-                    if (timeout <= 0L) {
-                        return null;
+                    watchKey = watchPoll(watchService, remain);
+                    remain -= System.currentTimeMillis() - cur;
+                    if (remain <= 0L) {
+                        throw new TimeoutWalException("Fetch the first wal timeout");
                     }
                 }
                 if (watchKey != null) {
@@ -185,7 +189,7 @@ public class NioWaler implements Waler {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return null;
+            throw new InterruptedWalException("Fetch the first wal interrupted", e);
         } finally {
             IoUtils.close(watchService);
         }
@@ -201,29 +205,34 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public SimpleWal get(long lsn) throws IOException, IllegalArgumentException {
+    public SimpleWal get(long lsn) throws WalException, IllegalArgumentException {
         checkLsn(lsn);
         ensureOpen();
 
         // WAl lookup basic algorithm:
         // 1) Find the log living in which wal file
         // 2) Skip to the offset in file, then read it
-        NioWalFile walFile = getWalFile(lsn);
-        if (walFile == null) {
-            return null;
-        }
-
+        NioWalFile walFile = null;
         try {
+            walFile = getWalFile(lsn);
+            if (walFile == null) {
+                return null;
+            }
+
             int offset = WalFileUtils.fileOffset(lsn);
             return walFile.get(offset);
         } catch (EOFException e) {
             // No more wal or partial wal
-            if (walFile.isLastFile()) {
+            if (walFile != null && walFile.isLastFile()) {
                 return null;
             }
-            throw e;
+            throw new IOWalException(e);
+        } catch (IOException e) {
+            throw new IOWalException(e);
         } finally {
-            walFile.release();
+            if (walFile != null) {
+                walFile.release();
+            }
         }
     }
 
@@ -234,12 +243,12 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public SimpleWal next(Wal wal) throws IOException, IllegalArgumentException {
+    public SimpleWal next(Wal wal) throws WalException, IllegalArgumentException {
         return next(wal, -1L);
     }
 
     @Override
-    public SimpleWal next(final Wal wal, long timeout) throws IOException, IllegalArgumentException {
+    public SimpleWal next(final Wal wal, final long timeout) throws WalException, IllegalArgumentException {
         SimpleWal w;
 
         if (wal instanceof SimpleWal) {
@@ -249,15 +258,18 @@ public class NioWaler implements Waler {
             if (w != null) {
                 return w;
             }
-            NioWalFile walFile = getWalFile(nextLsn);
-            if (walFile == null) {
-                return null;
-            }
 
+            NioWalFile walFile = null;
             WatchService watchService = null;
             try {
+                walFile = getWalFile(nextLsn);
+                if (walFile == null) {
+                    return null;
+                }
+
                 final File file = walFile.getFile();
                 final String filename = file.getName();
+                long remain = timeout;
                 for (;;) {
                     File last = WalFileUtils.lastFile(this.dir, filename);
                     if (!file.equals(last)) {
@@ -282,10 +294,10 @@ public class NioWaler implements Waler {
                         watchKey = watchPoll(watchService, timeout);
                     } else {
                         long cur = System.currentTimeMillis();
-                        watchKey = watchPoll(watchService, timeout);
-                        timeout -= System.currentTimeMillis() - cur;
-                        if (timeout <= 0L) {
-                            return null;
+                        watchKey = watchPoll(watchService, remain);
+                        remain -= System.currentTimeMillis() - cur;
+                        if (remain <= 0L) {
+                            throw new TimeoutWalException("Fetch the next wal timeout");
                         }
                     }
                     if (watchKey != null) {
@@ -300,10 +312,14 @@ public class NioWaler implements Waler {
                 } // for
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return null;
+                throw new InterruptedWalException("Fetch the next wal interrupted", e);
+            } catch (IOException e) {
+                throw new IOWalException(e);
             } finally {
                 IoUtils.close(watchService);
-                walFile.release();
+                if (walFile != null) {
+                    walFile.release();
+                }
             }
         } else {
             w = get(wal.getLsn());
@@ -314,7 +330,7 @@ public class NioWaler implements Waler {
         }
     }
 
-    protected WatchService regWatchService() throws IOException {
+    protected WatchService regWatchService() throws IOWalException {
         WatchService watchService = null;
         boolean failed = true;
         try {
@@ -325,6 +341,8 @@ public class NioWaler implements Waler {
                     StandardWatchEventKinds.ENTRY_MODIFY);
             failed = false;
             return watchService;
+        } catch (IOException e) {
+            throw new IOWalException("Register file watch service failed", e);
         } finally {
             if (failed) {
                 IoUtils.close(watchService);
@@ -391,7 +409,7 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public boolean purgeTo(String filename) throws IOException {
+    public boolean purgeTo(String filename) throws WalException {
         final AppendPurgeToItem item;
         ensureOpen();
 
@@ -401,12 +419,12 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public boolean purgeTo(long fileLsn) throws IOException {
+    public boolean purgeTo(long fileLsn) throws WalException {
         return purgeTo(WalFileUtils.filename(fileLsn));
     }
 
     @Override
-    public boolean clear() throws IOException {
+    public boolean clear() throws WalException {
         final AppendItem<Boolean> item;
         ensureOpen();
 
@@ -416,7 +434,7 @@ public class NioWaler implements Waler {
     }
 
     @Override
-    public void sync() throws IOException {
+    public void sync() throws WalException {
         final AppendItem<Object> item;
         ensureOpen();
 
@@ -425,8 +443,10 @@ public class NioWaler implements Waler {
         appender.append(item);
     }
 
-    protected void ensureOpen() throws IOException {
-        if (!isOpen()) throw new IOException("waler closed");
+    protected void ensureOpen() throws WalException {
+        if (!isOpen()) {
+            throw new IOWalException("waler closed");
+        }
     }
 
     @Override

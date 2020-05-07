@@ -29,7 +29,6 @@ import org.walog.util.Task;
 import org.walog.util.WalFileUtils;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.Random;
 import java.util.concurrent.Callable;
 
@@ -49,7 +48,7 @@ public class WalerFactoryTest extends Test {
     }
 
     @Override
-    protected void doTest() throws IOException {
+    protected void doTest() {
         // Test multi-thread read caches
         final String cacheSizeProp = "org.walog.file.cacheSize";
         final String oldCacheSize = System.getProperty(cacheSizeProp);
@@ -73,14 +72,14 @@ public class WalerFactoryTest extends Test {
             m = e;
             final Task<Void> t = newTask(new Callable<Void>() {
                 @Override
-                public Void call() throws IOException {
+                public Void call() {
                     final Random random = new Random();
                     for (int i = s; i < e; ++i) {
                         final int a = random.nextInt(i), b = random.nextInt(i);
                         final long cur = System.currentTimeMillis();
                         String data = cur+":"+a + "," + b + "," + (a + b);
                         Wal wal = walera.append(data);
-                        asserts( wal != null, "append wal failed");
+                        asserts( wal != null);
                         if (i % 10000 == 0) {
                             walera.sync();
                         }
@@ -153,13 +152,18 @@ public class WalerFactoryTest extends Test {
         // Check by iterate(lsn, timeout)
         itr = walerb.iterator(first.getLsn(), 1000);
         startTime = System.currentTimeMillis();
-        for (int i = 0; i < n; ++i) {
-            asserts(itr.hasNext(), "Data lost at i " + i);
-            wal = itr.next();
-            checkWal(wal);
+        try {
+            for (int i = 0; i < n; ++i) {
+                asserts(itr.hasNext(), "Data lost at i " + i);
+                wal = itr.next();
+                checkWal(wal);
+            }
+            asserts(!itr.hasNext(), "Data too many");
+        } catch (TimeoutWalException e) {
+            // pass
+        } finally {
+            itr.close();
         }
-        asserts (!itr.hasNext(), "Data too many");
-        itr.close();
         endTime = System.currentTimeMillis();
         IoUtils.info("Iterate-from-lsn-timeout %d items, time %dms", n, (endTime - startTime));
 
@@ -182,7 +186,7 @@ public class WalerFactoryTest extends Test {
         wal = walerb.first();
         do {
             ++i;
-            checkWal(wal);
+            checkWal(wal, i);
             wal = walerb.next(wal);
         } while (i < n);
         asserts(i == n && wal == null);
@@ -196,9 +200,14 @@ public class WalerFactoryTest extends Test {
         wal = walerb.first();
         do {
             ++i;
-            checkWal(wal);
+            checkWal(wal, i);
             last = wal;
-            wal = walerb.next(wal, i < n? 0: 100L);
+            try {
+                wal = walerb.next(wal, i < n ? 0 : 100L);
+            } catch (TimeoutWalException e) {
+                // pass
+                wal = null;
+            }
         } while (i < n);
         asserts(i == n && wal == null);
         endTime = System.currentTimeMillis();
@@ -218,6 +227,11 @@ public class WalerFactoryTest extends Test {
     }
 
     protected void checkWal(Wal wal) {
+        checkWal(wal, 0);
+    }
+
+    protected void checkWal(Wal wal, int index) {
+        asserts(wal != null, "index = " + index);
         // timestamp:a,b,sum
         String result = new String(wal.getData());
         //IoUtils.info("log data: %s", result);

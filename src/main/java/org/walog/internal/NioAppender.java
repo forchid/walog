@@ -24,6 +24,10 @@
 
 package org.walog.internal;
 
+import org.walog.IOWalException;
+import org.walog.InterruptedWalException;
+import org.walog.TimeoutWalException;
+import org.walog.WalException;
 import org.walog.util.IoUtils;
 import org.walog.util.WalFileUtils;
 
@@ -104,7 +108,7 @@ class NioAppender extends Thread implements AutoCloseable {
         this.open = true;
     }
 
-    public <V> V append(final AppendItem<V> item) throws IOException {
+    public <V> V append(final AppendItem<V> item) throws WalException {
         try {
             ensureOpen();
 
@@ -146,21 +150,21 @@ class NioAppender extends Thread implements AutoCloseable {
                     throw new IllegalStateException("Can't append again");
                 }
             }
-            IoUtils.debug("Append timeout");
-        } catch (FileLockTimeoutException e) {
-            IoUtils.debug("Acquire append file lock timeout");
-        } catch (final InterruptedException e) {
-            IoUtils.debug("Append interrupted");
-            item.setResult(null);
-            Thread.currentThread().interrupt();
-        }
 
-        return null;
+            throw new TimeoutWalException("Append timeout");
+        } catch (FileLockTimeoutException e) {
+            throw new TimeoutWalException("Acquire file lock timeout");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new InterruptedWalException("Append interrupted", e);
+        } catch (IOException e) {
+            throw new IOWalException("Append failed", e);
+        }
     }
 
-    protected void ensureOpen() throws IOException {
+    protected void ensureOpen() throws WalException {
         if (!isOpen()) {
-            throw new IOException("wal appender closed");
+            throw new IOWalException("wal appender closed");
         }
     }
 

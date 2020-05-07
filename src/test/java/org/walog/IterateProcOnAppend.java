@@ -26,8 +26,6 @@ package org.walog;
 
 import org.walog.util.IoUtils;
 
-import java.io.IOException;
-
 public class IterateProcOnAppend {
 
     public static void main(String[] args) throws Exception {
@@ -57,7 +55,7 @@ public class IterateProcOnAppend {
         iterate(appendItems, dataDir);
     }
 
-    static void iterate(int appendItems, String dataDir) throws IOException {
+    static void iterate(int appendItems, String dataDir) {
         IoUtils.info("Open in data dir: %s", dataDir);
         Waler walerI = WalerFactory.open(dataDir);
         int n = appendItems + 1;
@@ -67,7 +65,12 @@ public class IterateProcOnAppend {
             if (i == 0) {
                 wal = walerI.first(0);
             } else {
-                wal = walerI.next(wal, i < appendItems? 0: 10);
+                try {
+                    wal = walerI.next(wal, i < appendItems ? 0 : 10);
+                } catch (TimeoutWalException e) {
+                    // pass
+                    wal = null;
+                }
             }
             if (i < appendItems) {
                 String data = wal.toString();

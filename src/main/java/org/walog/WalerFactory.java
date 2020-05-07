@@ -35,13 +35,13 @@ import org.walog.internal.NioWaler;
  */
 public class WalerFactory {
     
-    public static Waler open(File dir) throws IOException {
+    public static Waler open(File dir) throws WalException {
         final Waler waler = new NioWaler(dir);
         waler.open();
         return waler;
     }
     
-    public static Waler open(String dir) throws IOException {
+    public static Waler open(String dir) throws WalException {
         return open(new File(dir));
     }
 

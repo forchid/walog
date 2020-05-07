@@ -24,36 +24,18 @@
 
 package org.walog;
 
-public class CorruptWalException extends WalException {
+public class WalException extends RuntimeException {
 
-    protected final String file;
-    protected final int offset;
-
-    public CorruptWalException(String message, String file, int offset) {
+    public WalException(String message) {
         super(message);
-
-        this.file = file;
-        this.offset = offset;
     }
 
-    @Override
-    public String getMessage() {
-        String base = super.getMessage();
-        return String.format("%s - offset 0x%x in '%s'", base, getOffset(), getFile());
+    public WalException(Throwable cause) {
+        super(cause);
     }
 
-    @Override
-    public String toString() {
-        String className = getClass().getName();
-        return (className+ ": "+getMessage());
-    }
-
-    public String getFile() {
-        return file;
-    }
-
-    public int getOffset() {
-        return offset;
+    public WalException(String message, Throwable cause) {
+        super(message, cause);
     }
 
 }
