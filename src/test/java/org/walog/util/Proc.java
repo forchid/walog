@@ -27,7 +27,6 @@ package org.walog.util;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 public class Proc {
 
@@ -118,18 +117,6 @@ public class Proc {
     public void join() throws InterruptedException {
         if (this.proc != null) {
             this.exitCode = this.proc.waitFor();
-        }
-    }
-
-    public boolean join(long millis) throws InterruptedException {
-        if (this.proc != null) {
-            boolean exited = this.proc.waitFor(millis, TimeUnit.MILLISECONDS);
-            if (exited) {
-                join();
-            }
-            return exited;
-        } else {
-            return true;
         }
     }
 

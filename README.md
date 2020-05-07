@@ -3,6 +3,7 @@ A simple and high performance WAL implementation, supports multi-thread or multi
 - Single thread appends 200,000+ items per second, iterates 1000,000+ items per second
 - Support multi-processes iterate/append logs
 - Simple API such as append(log)/first()/get(lsn)/next(log)/iterator()/iterator(lsn)/sync() etc
+- Require JDK 7+
 
 ## examples
 - Open wal logger

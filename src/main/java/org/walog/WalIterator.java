@@ -10,6 +10,9 @@ public interface WalIterator extends AutoCloseable, Iterator<Wal> {
     @Override
     Wal next() throws WalException;
 
+    @Override
+    void remove();
+
     boolean isOpen();
 
     @Override

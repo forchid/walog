@@ -103,7 +103,7 @@ class NioAppender extends Thread implements AutoCloseable {
         this.batchItems  = new ArrayList<>(batchSize);
         this.batchSize   = batchSize;
         this.appendLock  = new ReentrantLock();
-        this.appendQueue = isAsyncMode()? new ArrayBlockingQueue<>(queueSize): null;
+        this.appendQueue = isAsyncMode()? new ArrayBlockingQueue<AppendItem<?>>(queueSize): null;
 
         this.open = true;
     }

@@ -183,6 +183,11 @@ class NioWalIterator implements WalIterator {
     }
 
     @Override
+    public void remove() {
+        throw new UnsupportedOperationException("wal iterator read only");
+    }
+
+    @Override
     public boolean isOpen() {
         return this.open;
     }

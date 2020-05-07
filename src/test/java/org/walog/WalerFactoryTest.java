@@ -62,7 +62,8 @@ public class WalerFactoryTest extends Test {
         // 2020-01-04 async append mode: 10  threads append 39339ms, iterate 8713ms
         // 2020-01-04 async append mode: 200 threads append 36877ms, iterate 9007ms
         // 2020-01-04 async append mode: 250 threads append 38148ms, iterate 8686ms
-        int n = 10_000_000, c = 10, step = n / c;
+        int c = 10;
+        final int n = 10_000_000, step = n / c;
         
         final Waler walera = WalerFactory.open(dirFile);
         long startTime = System.currentTimeMillis();
