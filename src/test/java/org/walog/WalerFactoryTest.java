@@ -49,6 +49,13 @@ public class WalerFactoryTest extends Test {
 
     @Override
     protected void doTest() {
+        doTest(true);
+        doTest(false);
+    }
+
+    protected void doTest(boolean asyncMode) {
+        setAsyncMode(asyncMode);
+
         // Test multi-thread read caches
         final String cacheSizeProp = "org.walog.file.cacheSize";
         final String oldCacheSize = System.getProperty(cacheSizeProp);
@@ -64,7 +71,7 @@ public class WalerFactoryTest extends Test {
         // 2020-01-04 async append mode: 250 threads append 38148ms, iterate 8686ms
         int c = 10;
         final int n = 10_000_000, step = n / c;
-        
+
         final Waler walera = WalerFactory.open(dirFile);
         long startTime = System.currentTimeMillis();
         Task<?>[] workers = new Task[c];

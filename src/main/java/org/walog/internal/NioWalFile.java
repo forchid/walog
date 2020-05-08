@@ -25,6 +25,7 @@
 package org.walog.internal;
 
 import org.walog.CorruptWalException;
+import org.walog.Releaseable;
 import org.walog.Wal;
 import org.walog.util.IoUtils;
 import org.walog.util.LruCache;
@@ -32,6 +33,7 @@ import org.walog.util.WalFileUtils;
 
 import java.io.*;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,6 +47,7 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
     protected static final int BLOCK_CACHE_SIZE = getInteger(PROP_BLOCK_CACHE_SIZE, 16);
     protected static final int BLOCK_SIZE = 4 << 10;
     protected static final int WAL_MIN_SIZE = 1 + 8;
+    protected static final ByteOrder BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
 
     protected final File file;
     protected final long lsn;
@@ -92,7 +95,7 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
 
     protected ByteBuffer getWriteBuffer() {
         if (this.writeBuffer == null) {
-            this.writeBuffer = ByteBuffer.allocate(BLOCK_SIZE);
+            this.writeBuffer = wrapBuffer(new byte[BLOCK_SIZE]);
         }
 
         return this.writeBuffer;
@@ -217,16 +220,17 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         getBytes(offset + i, data);
         i += data.length;
 
-        final byte[] ia = new byte[4];
-        getBytes(offset + i, ia);
-        i += ia.length;
-        final int offsetStored = IoUtils.readInt(ia);
+        final byte[] intArr = new byte[4];
+        final ByteBuffer intBuf = wrapBuffer(intArr);
+        getBytes(offset + i, intArr);
+        i += intArr.length;
+        final int offsetStored = intBuf.getInt(0);
         if (offsetStored != offset) {
             throw new CorruptWalException("Offset not matched", this.file.getAbsolutePath(), offset);
         }
 
-        getBytes(offset + i, ia);
-        final int chkSum = IoUtils.readInt(ia);
+        getBytes(offset + i, intArr);
+        final int chkSum = intBuf.getInt(0);
         if (chkSum != IoUtils.getFletcher32(data)) {
             throw new CorruptWalException("Checksum error", this.file.getAbsolutePath(), offset);
         }
@@ -234,18 +238,38 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         return new SimpleWal(this.lsn | offset, (byte)p, data);
     }
 
+    private ByteBuffer wrapBuffer(byte[] buffer) {
+        ByteBuffer buf = ByteBuffer.wrap(buffer);
+        buf.order(BYTE_ORDER);
+        return buf;
+    }
+
     public void append(List<AppendPayloadItem> items) throws IOException {
         this.filePos = this.chan.size();
         this.chan.position(this.filePos);
-        for (final AppendPayloadItem item : items) {
+
+        final int n = items.size();
+        int i = 0, flushIndex = 0;
+        while (i < n) {
+            AppendPayloadItem item = items.get(i);
             if (!item.isCompleted()) {
-                item.wal = append(item.payload);
+                flushIndex = append(items, item, i, flushIndex);
+            }
+            ++i;
+        }
+
+        flush(items, i, flushIndex);
+        for (AppendPayloadItem item : items) {
+            if (item.wal != null) {
+                item.setResult(item.wal);
             }
         }
-        flush();
     }
 
-    public SimpleWal append(byte[] payload) throws IOException {
+    protected int append(List<AppendPayloadItem> items, AppendPayloadItem item, int i, int flushIndex)
+            throws IOException {
+
+        final byte[] payload = item.payload;
         final int length = payload.length;
         final int headSize;
         final byte pfx;
@@ -272,56 +296,80 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         final int offset = (int)this.filePos;
         final int chkSum = IoUtils.getFletcher32(payload);
         final ByteBuffer buffer = getWriteBuffer();
-        writeHeader(buffer, headSize, pfx, length);
-        write(buffer, payload);
-        writeInt(buffer, offset);
-        writeInt(buffer, chkSum);
+        flushIndex = writeHeader(items, i, flushIndex, buffer, headSize, pfx, length);
+        flushIndex = write(items, i, flushIndex, buffer, payload);
+        flushIndex = writeInt(items, i, flushIndex, buffer, offset);
+        flushIndex = writeInt(items, i, flushIndex, buffer, chkSum);
         this.filePos += walSize;
 
         final long lsn = this.lsn | offset;
-        return new SimpleWal(lsn, pfx, payload);
+        item.wal = new SimpleWal(lsn, pfx, payload);
+
+        return flushIndex;
     }
 
-    private void writeHeader(ByteBuffer buffer, int headSize, byte pfx, int length)
-            throws IOException {
+    private int writeHeader(List<AppendPayloadItem> items, final int i, int flushIndex,
+                             ByteBuffer buffer, int headSize, byte pfx, int length) throws IOException {
 
         if (headSize == 1) {
-            write(buffer, (byte)length);
+            flushIndex = write(items, i, flushIndex, buffer, (byte)length);
         } else if (headSize == 3) {
-            write(buffer, pfx);
-            write(buffer, (byte)(length));
-            write(buffer, (byte)(length >> 8));
+            flushIndex = write(items, i, flushIndex, buffer, pfx);
+            flushIndex = write(items, i, flushIndex, buffer, (byte)(length));
+            flushIndex = write(items, i, flushIndex, buffer, (byte)(length >> 8));
         } else if (headSize == 4) {
-            write(buffer, pfx);
-            write(buffer, (byte)(length));
-            write(buffer, (byte)(length >> 8));
-            write(buffer, (byte)(length >> 16));
+            flushIndex = write(items, i, flushIndex, buffer, pfx);
+            flushIndex = write(items, i, flushIndex, buffer, (byte)(length));
+            flushIndex = write(items, i, flushIndex, buffer, (byte)(length >> 8));
+            flushIndex = write(items, i, flushIndex, buffer, (byte)(length >> 16));
         } else {
             throw new IllegalArgumentException("headSize " + headSize);
         }
+
+        return flushIndex;
     }
 
-    protected void writeInt(ByteBuffer buffer, int i) throws IOException {
+    protected int writeInt(List<AppendPayloadItem> items, final int index, int flushIndex,
+                            ByteBuffer buffer, int i) throws IOException {
         if (buffer.remaining() < 4) {
-            flush();
+            flushIndex = flush(items, index, flushIndex);
         }
+        buffer.putInt(i);
 
-        final int p = buffer.position();
-        IoUtils.writeInt(i, buffer.array(), p);
-        buffer.position(p + 4);
+        return flushIndex;
     }
 
-    protected void write(ByteBuffer buffer, byte[] bytes) throws IOException {
+    protected int write(List<AppendPayloadItem> items, int i, int flushIndex,
+                         ByteBuffer buffer, byte[] bytes) throws IOException {
         for (final byte b : bytes) {
-            write(buffer, b);
+            flushIndex = write(items, i, flushIndex, buffer, b);
         }
+        return flushIndex;
     }
 
-    protected void write(ByteBuffer buffer, byte b) throws IOException {
+    protected int write(List<AppendPayloadItem> items, final int i, int flushIndex,
+                         ByteBuffer buffer, byte b) throws IOException {
         if (!buffer.hasRemaining()) {
-            flush();
+            flushIndex = flush(items, i, flushIndex);
         }
         buffer.put(b);
+
+        return flushIndex;
+    }
+
+    protected int flush(List<AppendPayloadItem> items, final int i, int flushIndex)
+            throws IOException {
+
+        flush();
+        while (flushIndex < i) {
+            AppendPayloadItem item = items.get(flushIndex);
+            if (item.wal != null) {
+                item.flushed = true;
+            }
+            ++flushIndex;
+        }
+
+        return flushIndex;
     }
 
     protected void flush() throws IOException {
@@ -362,10 +410,10 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         int offset;
         // 1. First back forward
         {
-            final byte[] buf = new byte[8];
-            final int p = (int)(size - buf.length);
+            final byte[] buf = new byte[4];
+            final int p = (int)(size - 8);
             getBytes(p, buf);
-            offset = IoUtils.readInt(buf);
+            offset = wrapBuffer(buf).getInt(0);
             try {
                 Wal wal = get(offset);
                 IoUtils.debug("walog last lsn 0x%x in '%s'", wal.getLsn(), this.file);

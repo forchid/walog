@@ -31,6 +31,7 @@ public class AppendPayloadItem extends AppendItem<Wal> {
     public final byte[] payload;
 
     protected Wal wal;
+    protected boolean flushed;
 
     public AppendPayloadItem(byte[] payload) {
         super(TAG_PAYLOAD);

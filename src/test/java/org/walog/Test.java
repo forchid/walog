@@ -73,6 +73,7 @@ public abstract class Test {
 
     protected void cleanup() {
         deleteDir(getName());
+        setAsyncMode(true);
     }
 
     protected File getDir() {
@@ -115,6 +116,10 @@ public abstract class Test {
             }
             IoUtils.info("Delete directory: %s", dirFile);
         }
+    }
+
+    public static void setAsyncMode(boolean asyncMode) {
+        System.setProperty("org.walog.append.asyncMode", asyncMode? "1": "0");
     }
 
     public static void sleep(long millis) {

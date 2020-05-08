@@ -59,7 +59,6 @@ class NioAppender extends Thread implements AutoCloseable {
     static int QUEUE_SIZE     = getInteger("org.walog.append.queueSize", 128);
     static int BATCH_SIZE     = getInteger("org.walog.append.batchSize", 128);
     static int APPEND_TIMEOUT = getInteger("org.walog.append.timeout", 50000);
-    static int ASYNC_MODE     = getInteger("org.walog.append.asyncMode", 1);
     static int AUTO_FLUSH     = getInteger("org.walog.append.autoFlush", 1);
     static int FLUSH_PERIOD   = getInteger("org.walog.append.flushPeriod", 100);
     static int FLUSH_UNLOCK   = getInteger("org.walog.append.flushUnlock", 1);
@@ -68,6 +67,7 @@ class NioAppender extends Thread implements AutoCloseable {
     static final AtomicLong ID_GEN = new AtomicLong();
 
     // Basic states
+    private final int asyncMode;
     private volatile boolean open;
     protected boolean appended;
     protected long syncTime;
@@ -90,6 +90,7 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     public NioAppender(NioWaler waler, int queueSize, int batchSize) {
+        this.asyncMode = getInteger("org.walog.append.asyncMode", 1);
         if (queueSize < 1) {
             throw new IllegalArgumentException("queueSize: " + queueSize);
         }
@@ -182,7 +183,7 @@ class NioAppender extends Thread implements AutoCloseable {
                 item = background(item);
             } while (item != null);
         } catch (final Throwable cause) {
-            setCauses(cause);
+            setResults(cause);
             if (item != null) {
                 item.setResult(cause);
             }
@@ -216,7 +217,7 @@ class NioAppender extends Thread implements AutoCloseable {
             } while (item != null && !end);
 
             // Do batch append
-            doAppend();
+            batchAppend();
             // Sync storage state
             if (this.appended && isAutoFlush() && isFlushTime()) {
                 IoUtils.debug("Auto flush start");
@@ -260,7 +261,7 @@ class NioAppender extends Thread implements AutoCloseable {
                 case AppendItem.TAG_PAYLOAD:
                     this.batchItems.add((AppendPayloadItem) item);
                     if (syncAppend) {
-                        doAppend();
+                        batchAppend();
                     }
                     break;
                 case AppendItem.TAG_SYNC:
@@ -289,7 +290,7 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected void sync(AppendItem<?> item) throws IOException {
-        doAppend();
+        batchAppend();
         if (item.isCompleted()) {
             return;
         }
@@ -324,7 +325,7 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected void clear(AppendItem<?> item) throws IOException {
-        doAppend();
+        batchAppend();
         if (item.isCompleted()) {
             return;
         }
@@ -358,7 +359,7 @@ class NioAppender extends Thread implements AutoCloseable {
         item.setResult(Boolean.TRUE);
     }
 
-    protected void doAppend() throws IOException {
+    protected void batchAppend() throws IOException {
         if (this.batchItems.size() == 0) {
             return;
         }
@@ -385,11 +386,7 @@ class NioAppender extends Thread implements AutoCloseable {
 
         checkFileLock();
         this.appendFile.append(this.batchItems);
-        for (AppendPayloadItem item : this.batchItems) {
-            item.setResult(item.wal);
-        }
         this.batchItems.clear();
-
         this.appended = true;
     }
 
@@ -537,18 +534,19 @@ class NioAppender extends Thread implements AutoCloseable {
         }
     }
 
-    protected void setCauses(final Throwable cause) {
-        AppendItem<?> item;
-
-        int n = this.batchItems.size();
-        for (int i = 0; i < n; ++i) {
-            item = this.batchItems.get(i);
-            item.setResult(cause);
+    protected void setResults(final Throwable cause) {
+        for (AppendPayloadItem item : this.batchItems) {
+            // Note: flushed item is ok
+            if (item.flushed) {
+                item.setResult(item.wal);
+            } else {
+                item.setResult(cause);
+            }
         }
         this.batchItems.clear();
 
         for (;;) {
-            item = this.appendQueue.poll();
+            AppendItem<?> item = this.appendQueue.poll();
             if (item == null) {
                 break;
             }
@@ -556,8 +554,8 @@ class NioAppender extends Thread implements AutoCloseable {
         }
     }
 
-    protected static boolean isAsyncMode() {
-        return (ASYNC_MODE == 1);
+    protected boolean isAsyncMode() {
+        return (this.asyncMode == 1);
     }
 
     protected static boolean isAutoFlush() {

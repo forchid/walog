@@ -49,12 +49,17 @@ public class IterateOnAppendTest extends Test {
     protected void doTest() throws IOException {
         int appendItems = 100000;
 
-        oneWaler(appendItems);
-        twoWalers(appendItems);
-        twoProcs(appendItems);
+        oneWaler(appendItems, true);
+        twoWalers(appendItems, true);
+        twoProcs(appendItems, true);
+
+        oneWaler(appendItems, false);
+        twoWalers(appendItems, false);
+        twoProcs(appendItems, false);
     }
 
-    protected void oneWaler(final int appendItems) throws IOException {
+    protected void oneWaler(final int appendItems, boolean asyncMode) throws IOException {
+        setAsyncMode(asyncMode);
         final File dir = getDir();
         final Waler waler = WalerFactory.open(dir);
 
@@ -124,7 +129,8 @@ public class IterateOnAppendTest extends Test {
         cleanup();
     }
 
-    protected void twoWalers(final int appendItems) throws IOException {
+    protected void twoWalers(final int appendItems, boolean asyncMode) throws IOException {
+        setAsyncMode(asyncMode);
         final File dir = getDir();
         final Waler walerA = WalerFactory.open(dir);
         final Waler walerI = WalerFactory.open(dir);
@@ -193,7 +199,8 @@ public class IterateOnAppendTest extends Test {
         cleanup();
     }
 
-    protected void twoProcs(final int appendItems) throws IOException {
+    protected void twoProcs(final int appendItems, boolean asyncMode) throws IOException {
+        setAsyncMode(asyncMode);
         final File dir = getDir();
         final Waler walerA = WalerFactory.open(dir);
 

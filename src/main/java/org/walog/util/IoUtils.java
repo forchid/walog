@@ -24,6 +24,9 @@
 
 package org.walog.util;
 
+import org.walog.IOWalException;
+import org.walog.WalException;
+
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -46,20 +49,20 @@ public final class IoUtils {
         // NOOP
     }
 
-    public static PrintStream newStream(String propertyName, PrintStream def) {
+    public static PrintStream newStream(String propertyName, PrintStream def) throws WalException {
         final PrintStream out;
-        String errorFile = System.getProperty("org.walog.errorFile");
-        if (errorFile == null) {
+        String filename = System.getProperty(propertyName);
+        if (filename == null) {
             out = def;
         } else {
             OutputStream tar = null;
             boolean failed = true;
             try {
-                tar = new FileOutputStream(errorFile);
+                tar = new FileOutputStream(filename);
                 out = new PrintStream(tar, true);
                 failed = false;
             } catch (final IOException e) {
-                throw new RuntimeException("Access file failed", e);
+                throw new IOWalException("Access file failed", e);
             } finally {
                 if (failed) {
                     close(tar);
@@ -70,28 +73,9 @@ public final class IoUtils {
         return out;
     }
 
-    public static int readInt(byte[] buffer) {
-        return readInt(buffer, 0);
-    }
-
-    public static int readInt(byte[] buffer, int offset) {
-        int i = buffer[offset++] & 0xff;
-        i |= (buffer[offset++] & 0xff) << 8;
-        i |= (buffer[offset++] & 0xff) << 16;
-        i |= (buffer[offset]   & 0xff) << 24;
-        return i;
-    }
-
-    public static void writeInt(int i, byte[] buffer, int offset) {
-        buffer[offset++] = (byte)(i & 0xff);
-        buffer[offset++] = (byte)((i >>>  8) & 0xff);
-        buffer[offset++] = (byte)((i >>> 16) & 0xff);
-        buffer[offset]   = (byte)((i >>> 24) & 0xff);
-    }
-
     public static void readFully(FileChannel chan, ByteBuffer buffer, long pos)
             throws IOException {
-        for (; buffer.hasRemaining(); ) {
+        while (buffer.hasRemaining()) {
             final int i = chan.read(buffer, pos);
             if (i == -1) {
                 throw new EOFException();

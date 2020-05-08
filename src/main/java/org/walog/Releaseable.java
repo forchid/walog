@@ -1,4 +1,4 @@
-package org.walog.internal;
+package org.walog;
 
 public interface Releaseable {
 

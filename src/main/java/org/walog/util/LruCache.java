@@ -24,7 +24,7 @@
 
 package org.walog.util;
 
-import org.walog.internal.Releaseable;
+import org.walog.Releaseable;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;
