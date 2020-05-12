@@ -4,6 +4,7 @@ A simple and high performance WAL implementation, supports multi-thread or multi
 - Support multi-processes iterate/append logs
 - Simple API such as append(log)/first()/get(lsn)/next(log)/iterator()/iterator(lsn)/sync() etc
 - Require JDK 7+
+- Provide a wal replication framework of master/slave
 
 ## examples
 - Open wal logger
