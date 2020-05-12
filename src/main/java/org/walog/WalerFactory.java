@@ -27,6 +27,7 @@ package org.walog;
 import java.io.*;
 
 import org.walog.internal.NioWaler;
+import org.walog.util.IoUtils;
 
 /**
  * @author little-pan
@@ -43,6 +44,29 @@ public class WalerFactory {
     
     public static Waler open(String dir) throws WalException {
         return open(new File(dir));
+    }
+
+    public static Waler open(File dir, WalSlave slave) throws WalException {
+        if (slave == null) {
+            throw new NullPointerException("slave must be given");
+        }
+
+        final NioWaler waler = new NioWaler(dir, slave);
+        waler.open();
+        boolean failed = true;
+        try {
+            slave.open(waler);
+            failed = false;
+            return waler;
+        } finally {
+            if (failed) {
+                IoUtils.close(waler);
+            }
+        }
+    }
+
+    public static Waler open(String dir, WalSlave slave) throws WalException {
+        return open(new File(dir), slave);
     }
 
 }

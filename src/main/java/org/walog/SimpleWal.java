@@ -22,9 +22,8 @@
  * SOFTWARE.
  */
 
-package org.walog.internal;
+package org.walog;
 
-import org.walog.Wal;
 import org.walog.util.WalFileUtils;
 
 public class SimpleWal implements Wal {
@@ -33,43 +32,77 @@ public class SimpleWal implements Wal {
     final byte prefix;
     protected final byte[] data;
 
-    protected SimpleWal(long lsn, byte prefix, byte[] data) {
+    public SimpleWal(long lsn, byte prefix, byte[] data) {
         this.lsn = lsn;
         this.prefix = prefix;
-        this.data= data;
+        this.data = data;
     }
 
-    int getHeadSize() {
-        final int p = this.prefix & 0xff;
+    public static byte lengthPrefix(byte[] data) throws IllegalArgumentException {
+        byte pfx;
+        int length = data.length;
+
+        if (length >= 1 << 24) {
+            throw new IllegalArgumentException("data too long");
+        }
+
+        if (length >= 1 << 16) {
+            pfx = (byte)0xfd;
+        } else if (length >= 0xfb) {
+            pfx = (byte)0xfc;
+        } else {
+            pfx = (byte)length;
+        }
+
+        return pfx;
+    }
+
+    public static int headSize(byte lengthPrefix) {
+        int p = lengthPrefix & 0xff;
+
         if (p < 0xfb) {
             return 1;
         } else if (p == 0xfc) {
             return 3;
-        } else {
+        } else if (p == 0xfd) {
             return 4;
+        } else {
+            String message = "Illegal prefix of wal length: " + Integer.toHexString(p);
+            throw new IllegalArgumentException(message);
         }
+    }
+
+    int getHeadSize() {
+        return headSize(this.prefix);
     }
 
     public int getOffset() {
         return WalFileUtils.fileOffset(this.lsn);
     }
 
-    public int nextOffset() {
+    protected int getNextOffset() {
         final int offset = getOffset();
-        int nextOffset = offset + getHeadSize() + getData().length + 8;
-        if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK) {
-            throw new IllegalStateException("offset full");
+        return (offset + getHeadSize() + this.data.length + 8);
+    }
+
+    public int nextOffset() throws WalException {
+        final int nextOffset = getNextOffset();
+        if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK/*Note: not ROLL_SIZE for a little overflow */) {
+            throw new WalException("Offset full");
         }
+
         return nextOffset;
     }
 
-    public long nextLsn() {
+    @Override
+    public long nextLsn() throws WalException {
         final int nextOffset = nextOffset();
-        if (nextOffset < 0 || nextOffset > Wal.LSN_OFFSET_MASK) {
-            throw new IllegalStateException("offset full");
-        }
-
         return (WalFileUtils.fileLsn(this.lsn) + nextOffset);
+    }
+
+    @Override
+    public long nextFileLsn() {
+        return WalFileUtils.nextFileLsn(this.lsn);
     }
 
     @Override

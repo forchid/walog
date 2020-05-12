@@ -24,13 +24,14 @@
 
 package org.walog.internal;
 
+import org.walog.SimpleWal;
 import org.walog.Wal;
 
 public class AppendPayloadItem extends AppendItem<Wal> {
 
     public final byte[] payload;
 
-    protected Wal wal;
+    protected SimpleWal wal;
     protected boolean flushed;
 
     public AppendPayloadItem(byte[] payload) {

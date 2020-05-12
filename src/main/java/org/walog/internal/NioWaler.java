@@ -46,6 +46,8 @@ public class NioWaler implements Waler {
     private volatile boolean open;
 
     protected final File dir;
+    protected final WalSlave slave;
+
     // file lsn -> wal file
     protected final LruCache<Long, NioWalFile> walCache;
     private final Object appenderInitLock = new Object();
@@ -56,8 +58,13 @@ public class NioWaler implements Waler {
      * @param dir the logger directory
      */
     public NioWaler(File dir) {
+        this(dir, null);
+    }
+
+    public NioWaler(File dir, WalSlave slave) {
         this.dir = dir;
         this.walCache = new LruCache<>(WalFileUtils.CACHE_SIZE);
+        this.slave = slave;
     }
     
     @Override
@@ -98,6 +105,10 @@ public class NioWaler implements Waler {
 
     protected Wal append(byte[] log, boolean copy) throws WalException {
         ensureOpen();
+        if (this.slave != null) {
+            throw new IllegalStateException("Waler opened by wal slave");
+        }
+
         if (copy) {
             log = Arrays.copyOf(log, log.length);
         }
@@ -111,7 +122,12 @@ public class NioWaler implements Waler {
         if (appender == null) {
             synchronized (this.appenderInitLock) {
                 if (this.appender == null) {
-                    this.appender = new NioAppender(this);
+                    if (this.slave == null) {
+                        this.appender = new NioAppender(this);
+                    } else {
+                        this.appender = new NioAppender(this, false, 0);
+                    }
+
                     boolean failed = true;
                     try {
                         this.appender.start();
@@ -441,6 +457,25 @@ public class NioWaler implements Waler {
         final NioAppender appender = getAppender();
         item = new AppendItem<>(AppendItem.TAG_SYNC);
         appender.append(item);
+    }
+
+    @Override
+    public SimpleWal last() throws WalException {
+        final AppendItem<SimpleWal> item;
+        ensureOpen();
+
+        final NioAppender appender = getAppender();
+        item = new AppendItem<>(AppendItem.TAG_FLAST);
+
+        return appender.append(item);
+    }
+
+    // Internal method
+    public Wal append(SimpleWal wal) throws WalException {
+        AppendPayloadItem item = new AppendWalItem(wal);
+        NioAppender appender = getAppender();
+
+        return appender.append(item);
     }
 
     protected void ensureOpen() throws WalException {

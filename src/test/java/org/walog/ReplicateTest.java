@@ -24,55 +24,46 @@
 
 package org.walog;
 
-import org.walog.util.IoUtils;
+import java.io.File;
 
-import java.util.ArrayList;
-import java.util.List;
-
-public class AllTest extends Test {
-
-    protected final List<Test> tests = new ArrayList<>();
+public class ReplicateTest extends Test {
 
     public static void main(String[] args) {
-        for (int i = 0; i < iterates; ++i)
-            new AllTest(i).test();
+        new ReplicateTest(iterates).test();
     }
 
-    public AllTest(int iterate) {
+    public ReplicateTest(int iterate) {
         super(iterate);
     }
 
     @Override
     protected void doTest() {
-        final long start = System.currentTimeMillis();
-        for (final Test t: this.tests) {
-            final long ts = System.currentTimeMillis();
-            IoUtils.info(">> Iterate-%d: %s start", this.iterate, t.getName());
-            t.test();
-            final long te = System.currentTimeMillis();
-            IoUtils.info("<< Iterate-%d: %s end(time %dms)", this.iterate, t.getName(), (te - ts));
+        File testDir = getDir();
+        File masterDir = getDir(testDir, "master");
+        File slaveDir = getDir(testDir, "slave");
+
+        InProcWalSlave slave = new InProcWalSlave(null);
+        try {
+            try (Waler slaveWaler = WalerFactory.open(slaveDir, slave);
+                 Waler masterWaler = WalerFactory.open(masterDir)) {
+
+                InProcWalMaster master = new InProcWalMaster(masterWaler, slave);
+                slave.setMaster(master);
+
+                master.onActive();
+                slave.onActive();
+
+                masterWaler.append("1");
+                masterWaler.append("2");
+
+                Wal wal = slaveWaler.first(0);
+                asserts("1".equals(new String(wal.getData(), Wal.CHARSET)));
+                wal = slaveWaler.next(wal, 0);
+                asserts("2".equals(new String(wal.getData(), Wal.CHARSET)));
+            }
+        } finally {
+            slave.onInactive();
         }
-        final long end = System.currentTimeMillis();
-        IoUtils.info("%s complete(time %dms)", getName(), (end - start));
-    }
-
-    @Override
-    protected void prepare() {
-        final int i = this.iterate;
-
-        add(new IterateOnAppendTest(i))
-        .add(new ReplicateTest(i))
-        .add(new WalerFactoryTest(i));
-    }
-
-    @Override
-    protected void cleanup() {
-        this.tests.clear();
-    }
-
-    protected AllTest add(Test t) {
-        this.tests.add(t);
-        return this;
     }
 
 }

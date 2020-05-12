@@ -24,7 +24,7 @@
 
 package org.walog;
 
-/** The WAL manager.
+ /** The WAL manager.
  * 
  * @author little-pan
  * @since 2019-12-22
@@ -126,6 +126,13 @@ public interface Waler extends AutoCloseable {
     boolean clear() throws WalException;
 
     void sync() throws WalException;
+
+     /** Fetch the last wal.
+      *
+      * @return the last wal, or null if not found
+      * @throws WalException if IO error, timeout or interrupted
+      */
+    Wal last() throws WalException;
     
     boolean isOpen();
     

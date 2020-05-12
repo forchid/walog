@@ -32,11 +32,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class AppendItem<V> {
 
-    public static final int TAG_PAYLOAD = 0x01;
-    public static final int TAG_SYNC    = 0x02;
-    public static final int TAG_PURGE   = 0x04;
-    public static final int TAG_CLEAR   = 0x08;
-    public static final int TAG_END     = 0x10;
+    public static final int TAG_PAYLOAD    = 0x01;
+    public static final int TAG_SYNC       = 0x02;
+    public static final int TAG_PURGE      = 0x04;
+    public static final int TAG_CLEAR      = 0x08;
+    public static final int TAG_FLAST      = 0x10; // fetch last wal
+    public static final int TAG_END        = 0x80; // finish append
 
     public static final Object DUMMY_VALUE = new Object();
     static final AppendItem<?> END_ITEM = new AppendItem<>(TAG_END);

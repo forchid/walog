@@ -25,6 +25,7 @@
 package org.walog.internal;
 
 import org.walog.IOWalException;
+import org.walog.SimpleWal;
 import org.walog.WalException;
 import org.walog.WalIterator;
 import org.walog.util.IoUtils;

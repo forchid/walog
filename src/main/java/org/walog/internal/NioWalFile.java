@@ -24,9 +24,7 @@
 
 package org.walog.internal;
 
-import org.walog.CorruptWalException;
-import org.walog.Releaseable;
-import org.walog.Wal;
+import org.walog.*;
 import org.walog.util.IoUtils;
 import org.walog.util.LruCache;
 import org.walog.util.WalFileUtils;
@@ -201,18 +199,18 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
 
         // wal format: Length(var-int), Data, Offset(int), Data checksum(int)
         int length, i = 0;
-        final int p = getByte(offset + i++) & 0xff;
-        if (p < 0xfb) {
-            length = p;
-        } else if (p == 0xfc) {
+        final int prefix = getByte(offset + i++) & 0xff;
+        if (prefix < 0xfb) {
+            length = prefix;
+        } else if (prefix == 0xfc) {
             length  =  getByte(offset + i++) & 0xff;
             length |= (getByte(offset + i++) & 0xff) << 8;
-        } else if (p == 0xfd) {
+        } else if (prefix == 0xfd) {
             length  =  getByte(offset + i++) & 0xff;
             length |= (getByte(offset + i++) & 0xff) << 8;
             length |= (getByte(offset + i++) & 0xff) << 16;
         } else {
-            final String message = "Illegal prefix of wal length: " + Integer.toHexString(p);
+            final String message = "Illegal prefix of wal length: " + Integer.toHexString(prefix);
             throw new CorruptWalException(message, this.file.getAbsolutePath(), offset);
         }
 
@@ -235,7 +233,7 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
             throw new CorruptWalException("Checksum error", this.file.getAbsolutePath(), offset);
         }
 
-        return new SimpleWal(this.lsn | offset, (byte)p, data);
+        return new SimpleWal(this.lsn | offset, (byte)prefix, data);
     }
 
     private ByteBuffer wrapBuffer(byte[] buffer) {
@@ -244,7 +242,7 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         return buf;
     }
 
-    public void append(List<AppendPayloadItem> items) throws IOException {
+    public SimpleWal append(List<AppendPayloadItem> items) throws IOException {
         this.filePos = this.chan.size();
         this.chan.position(this.filePos);
 
@@ -258,12 +256,15 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
             ++i;
         }
 
+        SimpleWal last = null;
         flush(items, i, flushIndex);
         for (AppendPayloadItem item : items) {
             if (item.wal != null) {
-                item.setResult(item.wal);
+                item.setResult(last = item.wal);
             }
         }
+
+        return last;
     }
 
     protected int append(List<AppendPayloadItem> items, AppendPayloadItem item, int i, int flushIndex)
@@ -271,22 +272,9 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
 
         final byte[] payload = item.payload;
         final int length = payload.length;
-        final int headSize;
-        final byte pfx;
+        final byte prefix = SimpleWal.lengthPrefix(payload);
+        final int headSize = SimpleWal.headSize(prefix);
 
-        if (length >= 1 << 24) {
-            throw new IllegalArgumentException("payload too big");
-        }
-        if (length >= 1 << 16) {
-            headSize = 4;
-            pfx = (byte)0xfd;
-        } else if (length >= 0xfb) {
-            headSize = 3;
-            pfx = (byte)0xfc;
-        } else {
-            headSize = 1;
-            pfx = (byte)length;
-        }
         // wal format: Length(var-int), Data, Offset(int), Data checksum(int)
         final int walSize  = headSize + payload.length + 8;
         if (this.filePos + walSize > Wal.LSN_OFFSET_MASK) {
@@ -294,16 +282,36 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         }
 
         final int offset = (int)this.filePos;
+        // Check the replicated wal from wal master node
+        if (item instanceof AppendWalItem) {
+            final SimpleWal wal = item.wal;
+            item.wal = null;
+
+            long fileLsn = WalFileUtils.fileLsn(wal.getLsn());
+            if (this.lsn != fileLsn) {
+                String error = String.format("File lsn %x of wal from wal master " +
+                        "not matched current append file lsn %x", fileLsn, this.lsn);
+                throw new WalException(error);
+            }
+
+            int walOffset = wal.getOffset();
+            if (offset != walOffset) {
+                String error = String.format("File offset %d of wal from wal master " +
+                        "not matched current append file offset %d", walOffset, offset);
+                throw new WalException(error);
+            }
+        }
+
         final int chkSum = IoUtils.getFletcher32(payload);
         final ByteBuffer buffer = getWriteBuffer();
-        flushIndex = writeHeader(items, i, flushIndex, buffer, headSize, pfx, length);
+        flushIndex = writeHeader(items, i, flushIndex, buffer, headSize, prefix, length);
         flushIndex = write(items, i, flushIndex, buffer, payload);
         flushIndex = writeInt(items, i, flushIndex, buffer, offset);
         flushIndex = writeInt(items, i, flushIndex, buffer, chkSum);
         this.filePos += walSize;
 
         final long lsn = this.lsn | offset;
-        item.wal = new SimpleWal(lsn, pfx, payload);
+        item.wal = new SimpleWal(lsn, prefix, payload);
 
         return flushIndex;
     }
@@ -399,11 +407,11 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         resetWriteBuffer();
     }
 
-    public void recovery() throws IOException {
+    public SimpleWal recovery() throws IOException {
         final long size = this.size();
         if (size < WAL_MIN_SIZE) {
             this.chan.truncate(0L);
-            return;
+            return null;
         }
 
         // Check integrity
@@ -415,10 +423,10 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
             getBytes(p, buf);
             offset = wrapBuffer(buf).getInt(0);
             try {
-                Wal wal = get(offset);
+                SimpleWal wal = get(offset);
                 IoUtils.debug("walog last lsn 0x%x in '%s'", wal.getLsn(), this.file);
                 this.chan.position(size);
-                return;
+                return wal;
             } catch (CorruptWalException |EOFException e) {
                 IoUtils.error("walog exit abnormally, recovery ...", e);
                 offset = 0;
@@ -428,9 +436,17 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
         SimpleWal wal = null;
         try {
             while (offset < size) {
-                wal = get(offset);
+                final SimpleWal next = get(offset);
+                if (next == null) {
+                    break;
+                }
+                wal = next;
                 offset = wal.nextOffset();
             }
+            this.chan.truncate(offset);
+            this.chan.position(offset);
+
+            return wal;
         } catch (final EOFException e) {
             final String message;
             if (wal == null) {
@@ -443,6 +459,7 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
             IoUtils.error(message, e);
             this.chan.truncate(offset);
             this.chan.position(offset);
+            return wal;
         }
     }
 

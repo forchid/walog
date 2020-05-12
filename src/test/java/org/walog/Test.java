@@ -79,9 +79,17 @@ public abstract class Test {
     protected File getDir() {
         return getDir(getName());
     }
-    
+
     public static File getDir(String dir) {
-        File file = new File(testDir, dir);
+        return getDir(testDir, dir);
+    }
+
+    public static File getDir(String parent, String dir) {
+        return getDir(new File(parent), dir);
+    }
+    
+    public static File getDir(File parent, String dir) {
+        File file = new File(parent, dir);
         if (!file.isDirectory()) {
             if (!file.mkdirs()) {
                 throw new IllegalStateException("Can't create dir: " + file);
