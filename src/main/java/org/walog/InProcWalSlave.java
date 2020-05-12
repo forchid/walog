@@ -26,31 +26,17 @@ package org.walog;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
-public class InProcWalSlave extends WalSlave implements Runnable {
+public class InProcWalSlave extends WalSlave {
 
     protected InProcWalMaster master;
-    final BlockingQueue<ByteBuffer> bufferQueue;
 
     public InProcWalSlave(SimpleWal currWal) {
         super(currWal);
-        this.bufferQueue = new LinkedBlockingQueue<>();
     }
 
     public void setMaster(InProcWalMaster master) {
         this.master = master;
-    }
-
-    @Override
-    public void onActive() {
-        super.onActive();
-
-        Thread handler = new Thread(this, "slave-handler");
-        handler.setDaemon(true);
-        handler.start();
     }
 
     @Override
@@ -74,31 +60,6 @@ public class InProcWalSlave extends WalSlave implements Runnable {
         buf.put(buffer);
         buf.flip();
         this.master.receive(buf);
-    }
-
-    @Override
-    public void receive(ByteBuffer buffer) throws WalException {
-        this.bufferQueue.offer(buffer);
-    }
-
-    protected void handle(ByteBuffer buffer) {
-        super.receive(buffer);
-    }
-
-    @Override
-    public void run() {
-        try {
-            long timeout = 1000L;
-            ByteBuffer buffer;
-            while (isOpen()) {
-                buffer = this.bufferQueue.poll(timeout, TimeUnit.MILLISECONDS);
-                if (buffer != null) {
-                    handle(buffer);
-                }
-            }
-        } catch (InterruptedException e) {
-            // exit
-        }
     }
 
 }

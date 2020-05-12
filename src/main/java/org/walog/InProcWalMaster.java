@@ -45,9 +45,9 @@ public class InProcWalMaster extends WalMaster {
     public void onActive() {
         super.onActive();
 
-        Thread handler = new Thread(this.fetch, "master-handler");
-        handler.setDaemon(true);
-        handler.start();
+        Thread replicator = new Thread(this.replicate, "master-replicator");
+        replicator.setDaemon(true);
+        replicator.start();
     }
 
     @Override
@@ -82,13 +82,14 @@ public class InProcWalMaster extends WalMaster {
         super.receive(buffer);
     }
 
-    protected final Runnable fetch = new Runnable() {
+    final Runnable replicate = new Runnable() {
 
         @Override
         public void run() {
+            long timeout = 1000L;
+            ByteBuffer buffer;
+
             try {
-                long timeout = 1000L;
-                ByteBuffer buffer;
                 while (isOpen()) {
                     buffer =  bufferQueue.poll(timeout, TimeUnit.MILLISECONDS);
                     if (buffer != null) {

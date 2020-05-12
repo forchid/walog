@@ -53,13 +53,23 @@ public class ReplicateTest extends Test {
                 master.onActive();
                 slave.onActive();
 
-                masterWaler.append("1");
-                masterWaler.append("2");
+                String prefix = "Wal-wal-wal-wal-wal-wal-wal-wal-wal-";
+                int n = 1_000_000;
+                for (int i = 0; i < n; ++i) {
+                    masterWaler.append(prefix + i);
+                }
 
+                int i = 0;
                 Wal wal = slaveWaler.first(0);
-                asserts("1".equals(new String(wal.getData(), Wal.CHARSET)));
-                wal = slaveWaler.next(wal, 0);
-                asserts("2".equals(new String(wal.getData(), Wal.CHARSET)));
+                do {
+                    String log  = prefix + i;
+                    String data = new String(wal.getData(), Wal.CHARSET);
+                    asserts(log.equals(data), "Replicated wal not matched");
+                    if (++i >= n) {
+                        break;
+                    }
+                    wal = slaveWaler.next(wal, 0);
+                } while (true);
             }
         } finally {
             slave.onInactive();

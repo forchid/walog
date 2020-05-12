@@ -114,20 +114,26 @@ public abstract class WalMaster implements WalNode, Runnable {
         IoUtils.debug("Wal fetcher running");
         final long timeout = 0L;
 
-        // Init
-        if (this.currLsn == -1L) {
-            Wal first = this.waler.first(timeout);
-            this.currLsn = first.getLsn();
-        }
-        WalIterator iterator = this.waler.iterator(this.currLsn, timeout);
-        this.iterator = iterator;
+        try {
+            // Init
+            if (this.currLsn == -1L) {
+                Wal first = this.waler.first(timeout);
+                this.currLsn = first.getLsn();
+            }
+            WalIterator iterator = this.waler.iterator(this.currLsn, timeout);
+            this.iterator = iterator;
 
-        // Fetch
-        this.state = STATE_FETCHING;
-        while (isOpen() && iterator.hasNext()) {
-            Wal wal = iterator.next();
-            Wal last = this.waler.last();
-            sendWalPacket(wal, last);
+            // Fetch
+            this.state = STATE_FETCHING;
+            while (isOpen() && iterator.hasNext()) {
+                Wal wal = iterator.next();
+                Wal last = this.waler.last();
+                sendWalPacket(wal, last);
+            }
+        } catch (WalException e) {
+            if (this.waler.isOpen()) {
+                throw e;
+            }
         }
     }
 
