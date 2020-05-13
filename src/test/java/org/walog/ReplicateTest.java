@@ -24,6 +24,8 @@
 
 package org.walog;
 
+import org.walog.util.IoUtils;
+
 import java.io.File;
 
 public class ReplicateTest extends Test {
@@ -38,41 +40,103 @@ public class ReplicateTest extends Test {
 
     @Override
     protected void doTest() {
+        int dataBaseLen = 36;
+        int items = 1_000_000;
+        inProcTest(dataBaseLen, items);
+
+        cleanup();
+        dataBaseLen = (4 << 10) - 30;
+        items = 1_00_000;
+        inProcTest(dataBaseLen, items);
+
+        cleanup();
+        dataBaseLen = 4 << 10;
+        items = 1_00_000;
+        inProcTest(dataBaseLen, items);
+    }
+
+    private void inProcTest(int dataBaseLen, int items) {
         File testDir = getDir();
         File masterDir = getDir(testDir, "master");
-        File slaveDir = getDir(testDir, "slave");
+        File slaveDir = getDir(testDir, "slave-a");
 
-        InProcWalSlave slave = new InProcWalSlave(null);
-        try {
-            try (Waler slaveWaler = WalerFactory.open(slaveDir, slave);
-                 Waler masterWaler = WalerFactory.open(masterDir)) {
+        final String prefix;
+        StringBuilder sb = new StringBuilder(dataBaseLen);
+        for (int i = 0; i < dataBaseLen; ++i) {
+            if (i % 2 == 0) {
+                sb.append('A');
+            } else {
+                sb.append('B');
+            }
+        }
+        prefix = sb.toString();
 
-                InProcWalMaster master = new InProcWalMaster(masterWaler, slave);
-                slave.setMaster(master);
+        // Test cases:
+        // 1) Replicate from the start wal
+        // 2) Replicate from specified wal
+        int caseIt = 0, case2Items = 1000;
+        Wal fromWal = null;
+        while (caseIt < 2) {
+            if (caseIt == 0) {
+                IoUtils.info("Replicate from the start wal");
+            } else {
+                IoUtils.info("Replicate from the wal 0x%x", fromWal.getLsn());
+            }
 
-                master.onActive();
-                slave.onActive();
+            InProcWalSlave slave = new InProcWalSlave(fromWal);
+            try {
+                try (Waler slaveWaler = WalerFactory.open(slaveDir, slave);
+                     Waler masterWaler = WalerFactory.open(masterDir)) {
 
-                String prefix = "Wal-wal-wal-wal-wal-wal-wal-wal-wal-";
-                int n = 1_000_000;
-                for (int i = 0; i < n; ++i) {
-                    masterWaler.append(prefix + i);
+                    InProcWalMaster master = new InProcWalMaster(masterWaler, slave);
+                    slave.setMaster(master);
+
+                    master.onActive();
+                    slave.onActive();
+
+                    final int n;
+                    int i;
+                    if (caseIt == 0) {
+                        i = 0;
+                        n = items;
+                    } else {
+                        n = items + case2Items;
+                        i = items;
+                    }
+
+                    // Master writes
+                    for (; i < n; ++i) {
+                        masterWaler.append(prefix + i);
+                    }
+
+                    // Slave reads
+                    Wal wal;
+                    if (caseIt == 0) {
+                        i = 0;
+                        wal = slaveWaler.first(0);
+                    } else {
+                        i = items;
+                        assert fromWal != null;
+                        wal = slaveWaler.next(fromWal, 0);
+                    }
+                    do {
+                        String log  = prefix + i;
+                        String data = new String(wal.getData(), Wal.CHARSET);
+                        asserts(log.equals(data), "Replicated wal not matched");
+                        if (++i >= n) {
+                            break;
+                        }
+                        wal = slaveWaler.next(wal, 0);
+                        fromWal = wal;
+                    } while (true);
+
+                    asserts(slave.bytesBehindMaster() == 0L);
                 }
 
-                int i = 0;
-                Wal wal = slaveWaler.first(0);
-                do {
-                    String log  = prefix + i;
-                    String data = new String(wal.getData(), Wal.CHARSET);
-                    asserts(log.equals(data), "Replicated wal not matched");
-                    if (++i >= n) {
-                        break;
-                    }
-                    wal = slaveWaler.next(wal, 0);
-                } while (true);
+                ++caseIt;
+            } finally {
+                slave.onInactive();
             }
-        } finally {
-            slave.onInactive();
         }
     }
 

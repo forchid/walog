@@ -39,13 +39,13 @@ public abstract class WalSlave implements WalNode {
     public static final int STATE_CLOSED    = 8;
 
     protected volatile NioWaler waler;
-    protected SimpleWal currWal;
+    protected Wal currWal;
     protected final AtomicLong lastLsn;
 
     private volatile int state = STATE_UNINITED;
     private boolean active;
 
-    protected WalSlave(SimpleWal currWal) {
+    protected WalSlave(Wal currWal) {
         this.currWal = currWal;
         this.lastLsn = new AtomicLong(-1L);
     }
@@ -115,7 +115,7 @@ public abstract class WalSlave implements WalNode {
 
                 // Packet format: length(int) + status(byte) [+ data-field(n bytes)]
                 if (rem < 4) {
-                    IoUtils.debug("Result too short(%d bytes) and wait more", rem);
+                    IoUtils.debug("Packet too short(%d bytes) and wait more", rem);
                     failed = false;
                     return;
                 }
@@ -186,6 +186,7 @@ public abstract class WalSlave implements WalNode {
             length |= (buffer.get(p + i++) & 0xff) << 8;
             length |= (buffer.get(p + i)   & 0xff) << 16;
         }
+        IoUtils.debug("wal payload length: %d", length);
         expectSize = 24 + headSize + length;
         if (size < expectSize) {
             IoUtils.debug("Wal packet too short(%d bytes) and wait more(%d bytes)", size, expectSize);
@@ -212,7 +213,7 @@ public abstract class WalSlave implements WalNode {
 
         // Check integrity
         if (chkSum != IoUtils.getFletcher32(data)) {
-            throw new NodeWalException("Wal corrupted from wal master");
+            throw new NodeWalException("Wal corrupted from master");
         }
         SimpleWal wal = new SimpleWal(walLsn, (byte)prefix, data);
         if (offset != wal.getOffset()) {
@@ -220,7 +221,7 @@ public abstract class WalSlave implements WalNode {
         }
 
         // Handle wal item
-        final SimpleWal currWal = this.currWal;
+        final Wal currWal = this.currWal;
         if (this.lastLsn.get() == -1L && currWal != null) {
             // 0) Init after open
             if (walLsn != currWal.getLsn()) {
@@ -235,7 +236,6 @@ public abstract class WalSlave implements WalNode {
                 throw new NodeWalException("Continuous replication violated");
             }
             onReceived(wal);
-            IoUtils.debug("append received wal: %s", wal);
             this.state = STATE_APPENDING;
             this.waler.append(wal);
             this.currWal = wal;

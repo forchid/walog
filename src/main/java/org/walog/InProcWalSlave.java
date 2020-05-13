@@ -30,8 +30,9 @@ import java.nio.ByteOrder;
 public class InProcWalSlave extends WalSlave {
 
     protected InProcWalMaster master;
+    protected ByteBuffer lastBuffer;
 
-    public InProcWalSlave(SimpleWal currWal) {
+    public InProcWalSlave(Wal currWal) {
         super(currWal);
     }
 
@@ -60,6 +61,41 @@ public class InProcWalSlave extends WalSlave {
         buf.put(buffer);
         buf.flip();
         this.master.receive(buf);
+    }
+
+    @Override
+    public void receive(ByteBuffer buffer) throws WalException {
+        ByteBuffer last = this.lastBuffer;
+
+        if (last == null) {
+            last = buffer;
+        } else {
+            int lastRem = last.remaining();
+            int bufRem = buffer.remaining();
+            if (last.capacity() - lastRem >= bufRem) {
+                last.position(lastRem);
+                last.limit(lastRem + bufRem);
+                last.put(buffer);
+            } else {
+                int newCap = lastRem + bufRem;
+                ByteBuffer newBuf = allocate(newCap);
+                newBuf.put(last);
+                newBuf.put(buffer);
+                last = newBuf;
+            }
+            last.flip();
+        }
+
+        super.receive(last);
+        if (last.hasRemaining()) {
+            if (last.position() != 0) {
+                last.compact();
+                last.flip();
+            }
+            this.lastBuffer = last;
+        } else {
+            this.lastBuffer = null;
+        }
     }
 
 }

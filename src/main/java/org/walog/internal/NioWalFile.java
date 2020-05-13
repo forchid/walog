@@ -289,15 +289,15 @@ public class NioWalFile implements  AutoCloseable, Releaseable {
 
             long fileLsn = WalFileUtils.fileLsn(wal.getLsn());
             if (this.lsn != fileLsn) {
-                String error = String.format("File lsn %x of wal from wal master " +
-                        "not matched current append file lsn %x", fileLsn, this.lsn);
+                String error = String.format("File lsn %x of wal from master " +
+                        "not matched with the append file lsn %x", fileLsn, this.lsn);
                 throw new WalException(error);
             }
 
             int walOffset = wal.getOffset();
             if (offset != walOffset) {
-                String error = String.format("File offset %d of wal from wal master " +
-                        "not matched current append file offset %d", walOffset, offset);
+                String error = String.format("File offset %d of wal from master " +
+                        "not matched with the append file offset %d", walOffset, offset);
                 throw new WalException(error);
             }
         }

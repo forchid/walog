@@ -24,30 +24,18 @@
 
 package org.walog;
 
+import org.walog.util.IoUtils;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
 public class InProcWalMaster extends WalMaster {
 
     protected final InProcWalSlave slave;
-    final BlockingQueue<ByteBuffer> bufferQueue;
 
     public InProcWalMaster(Waler waler, InProcWalSlave slave) {
         super(waler);
         this.slave = slave;
-        this.bufferQueue = new LinkedBlockingQueue<>();
-    }
-
-    @Override
-    public void onActive() {
-        super.onActive();
-
-        Thread replicator = new Thread(this.replicate, "master-replicator");
-        replicator.setDaemon(true);
-        replicator.start();
     }
 
     @Override
@@ -70,37 +58,8 @@ public class InProcWalMaster extends WalMaster {
         ByteBuffer buf =  this.slave.allocate(buffer.remaining());
         buf.put(buffer);
         buf.flip();
+
         this.slave.receive(buf);
     }
-
-    @Override
-    public void receive(ByteBuffer buffer) throws WalException {
-        this.bufferQueue.offer(buffer);
-    }
-
-    protected void handle(ByteBuffer buffer) {
-        super.receive(buffer);
-    }
-
-    final Runnable replicate = new Runnable() {
-
-        @Override
-        public void run() {
-            long timeout = 1000L;
-            ByteBuffer buffer;
-
-            try {
-                while (isOpen()) {
-                    buffer =  bufferQueue.poll(timeout, TimeUnit.MILLISECONDS);
-                    if (buffer != null) {
-                        handle(buffer);
-                    }
-                }
-            } catch (InterruptedException e) {
-                // exit
-            }
-        }
-
-    };
 
 }

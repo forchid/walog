@@ -29,7 +29,7 @@ import org.walog.util.WalFileUtils;
 
 import java.nio.ByteBuffer;
 
-public abstract class WalMaster implements WalNode, Runnable {
+public abstract class WalMaster implements WalNode {
 
     public static final int STATE_UNINITED  = 0;
     public static final int STATE_WAITING   = 1;
@@ -41,7 +41,7 @@ public abstract class WalMaster implements WalNode, Runnable {
 
     private volatile int state = STATE_UNINITED;
     protected WalIterator iterator;
-    private long currLsn;
+    private long fromLsn;
 
     protected WalMaster(Waler waler) throws NullPointerException {
        if (waler == null) {
@@ -94,61 +94,31 @@ public abstract class WalMaster implements WalNode, Runnable {
             onInactive();
             return;
         }
-        long currLsn = buffer.getLong();
-        if (currLsn < -1L) {
-            sendErrPacket("Error request lsn: " + currLsn);
+        long fromLsn = buffer.getLong();
+        if (fromLsn < -1L) {
+            sendErrPacket("Error request lsn: " + fromLsn);
             onInactive();
             return;
         }
 
         IoUtils.debug("Wal master initialized");
         this.state = STATE_INITED;
-        this.currLsn = currLsn;
-        Thread fetcher = new Thread(this, "wal-master");
+        this.fromLsn = fromLsn;
+        Thread fetcher = new Thread(this.replicate, "master-replicator");
         fetcher.setDaemon(true);
         fetcher.start();
     }
 
-    @Override
-    public void run() {
-        IoUtils.debug("Wal fetcher running");
-        final long timeout = 0L;
-
-        try {
-            // Init
-            if (this.currLsn == -1L) {
-                Wal first = this.waler.first(timeout);
-                this.currLsn = first.getLsn();
-            }
-            WalIterator iterator = this.waler.iterator(this.currLsn, timeout);
-            this.iterator = iterator;
-
-            // Fetch
-            this.state = STATE_FETCHING;
-            while (isOpen() && iterator.hasNext()) {
-                Wal wal = iterator.next();
-                Wal last = this.waler.last();
-                sendWalPacket(wal, last);
-            }
-        } catch (WalException e) {
-            if (this.waler.isOpen()) {
-                throw e;
-            }
-        }
-    }
-
     protected void sendWalPacket(Wal wal, Wal last) {
-        IoUtils.debug("Fetch: curr '%s', last '%s'", wal, last);
         // wal pack: last-lsn(long) + wal-lsn(long) + wal-item(var)
         // wal item: wal-length(var-int) + wal-payload + wal-offset(int) + wal-checksum(int)
         final byte[] data = wal.getData();
         final int dataLen = data.length;
-        int prefix = SimpleWal.lengthPrefix(data) & 0xff;
-        int headSize = SimpleWal.headSize((byte)prefix);
-        int packLen = 1 + 8 + 8 + headSize + dataLen + 8;
-        IoUtils.debug("Packet length %d", packLen);
+        final int prefix = SimpleWal.lengthPrefix(data) & 0xff;
+        final int headSize = SimpleWal.headSize((byte)prefix);
+        final int packLen = 1 + 8 + 8 + headSize + dataLen + 8;
 
-        ByteBuffer buf = allocate( 4 + packLen);
+        ByteBuffer buf = allocate();
         buf.putInt(packLen);
         buf.put(RES_WAL);
         buf.putLong(last.getLsn());
@@ -158,14 +128,26 @@ public abstract class WalMaster implements WalNode, Runnable {
         } else if (prefix == 0xfc) {
             buf.put((byte)prefix);
             buf.put((byte)(dataLen));
-            buf.put((byte)(dataLen << 8));
+            buf.put((byte)(dataLen >> 8));
         } else {
             buf.put((byte)prefix);
             buf.put((byte)(dataLen));
-            buf.put((byte)(dataLen << 8));
-            buf.put((byte)(dataLen << 16));
+            buf.put((byte)(dataLen >> 8));
+            buf.put((byte)(dataLen >> 16));
         }
-        buf.put(data);
+        for (byte b : data) {
+            if (!buf.hasRemaining()) {
+                buf.flip();
+                send(buf);
+                buf = allocate();
+            }
+            buf.put(b);
+        }
+        if (buf.remaining() < 8) {
+            buf.flip();
+            send(buf);
+            buf = allocate();
+        }
         int offset = WalFileUtils.fileOffset(wal.getLsn());
         buf.putInt(offset);
         int chkSum = IoUtils.getFletcher32(data);
@@ -177,7 +159,7 @@ public abstract class WalMaster implements WalNode, Runnable {
 
     protected void sendErrPacket(String message) {
         byte[] error = message.getBytes(Wal.CHARSET);
-        ByteBuffer buf = allocate(4 + 1 + error.length);
+        ByteBuffer buf = allocate();
         buf.putInt(1 + error.length);
         buf.put(RES_ERR);
         buf.put(error);
@@ -185,5 +167,36 @@ public abstract class WalMaster implements WalNode, Runnable {
         buf.flip();
         send(buf);
     }
+
+    private final Runnable replicate = new Runnable() {
+        @Override
+        public void run() {
+            IoUtils.debug("replicator running");
+            final long timeout = 0L;
+            WalMaster self = WalMaster.this;
+
+            try {
+                // Init
+                if (self.fromLsn == -1L) {
+                    Wal first = self.waler.first(timeout);
+                    self.fromLsn = first.getLsn();
+                }
+                WalIterator iterator = self.waler.iterator(self.fromLsn, timeout);
+                self.iterator = iterator;
+
+                // Fetch
+                self.state = STATE_FETCHING;
+                while (isOpen() && iterator.hasNext()) {
+                    Wal wal = iterator.next();
+                    Wal last = self.waler.last();
+                    sendWalPacket(wal, last);
+                }
+            } catch (WalException e) {
+                if (self.waler.isOpen()) {
+                    throw e;
+                }
+            }
+        }
+    };
 
 }
