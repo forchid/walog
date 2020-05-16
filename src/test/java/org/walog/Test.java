@@ -43,6 +43,24 @@ public abstract class Test {
     protected final static File testDir = new File(baseDir, "temp");
     protected static final int iterates = Integer.getInteger("org.walog.test.iterates", 2);
 
+    protected static boolean completed = false;
+    private static boolean failed = false;
+    static {
+        Thread monitor = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                IoUtils.info("started");
+                while (true) {
+                    sleep(1000L);
+                    if (failed) System.exit(1);
+                    if (completed) System.exit(0);
+                }
+            }
+        }, "test-monitor");
+        monitor.setDaemon(true);
+        monitor.start();
+    }
+
     protected final int iterate;
     
     protected Test(int iterate) {
@@ -54,13 +72,18 @@ public abstract class Test {
     }
     
     public void test() {
+        boolean failed = true;
         try {
             prepare();
             doTest();
+            failed = false;
         } catch (IOException e) {
             throw new RuntimeException(getName()+" failed", e);
         } finally {
             cleanup();
+            if (failed) {
+                Test.failed = true;
+            }
         }
     }
 

@@ -22,44 +22,46 @@
  * SOFTWARE.
  */
 
-package org.walog;
+package org.walog.rmi;
 
-import org.walog.util.IoUtils;
+import org.walog.Wal;
+import org.walog.WalException;
+import org.walog.WalIterator;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
 
-public class InProcWalMaster extends WalMaster {
+public class WalIteratorWrapper extends UnicastRemoteObject implements RmiIteratorWrapper {
 
-    protected final InProcWalSlave slave;
+    protected final WalIterator iterator;
 
-    public InProcWalMaster(Waler waler, InProcWalSlave slave) {
-        super(waler);
-        this.slave = slave;
+    public WalIteratorWrapper(WalIterator iterator) throws RemoteException {
+        this.iterator = iterator;
     }
 
     @Override
-    public ByteBuffer allocate() {
-        return wrapBuffer(allocate(4 << 10));
+    public boolean hasNext() throws WalException, RemoteException {
+        return this.iterator.hasNext();
     }
 
     @Override
-    public ByteBuffer allocate(int capacity) {
-        return wrapBuffer(ByteBuffer.allocate(capacity));
-    }
-
-    protected ByteBuffer wrapBuffer(ByteBuffer buffer) {
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
-        return buffer;
+    public Wal next() throws WalException, RemoteException {
+        return this.iterator.next();
     }
 
     @Override
-    public void send(ByteBuffer buffer) throws WalException {
-        ByteBuffer buf =  this.slave.allocate(buffer.remaining());
-        buf.put(buffer);
-        buf.flip();
+    public void remove() throws RemoteException {
+        this.iterator.remove();
+    }
 
-        this.slave.receive(buf);
+    @Override
+    public boolean isOpen() throws RemoteException {
+        return this.iterator.isOpen();
+    }
+
+    @Override
+    public void close() throws RemoteException {
+        this.iterator.close();
     }
 
 }

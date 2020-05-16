@@ -54,13 +54,6 @@ import static java.lang.Integer.getInteger;
  */
 class NioAppender extends Thread implements AutoCloseable {
 
-    static int QUEUE_SIZE     = getInteger("org.walog.append.queueSize", 128);
-    static int BATCH_SIZE     = getInteger("org.walog.append.batchSize", 128);
-    static int APPEND_TIMEOUT = getInteger("org.walog.append.timeout", 50000);
-    static int AUTO_FLUSH     = getInteger("org.walog.append.autoFlush", 1);
-    static int FLUSH_PERIOD   = getInteger("org.walog.append.flushPeriod", 100);
-    static int FLUSH_UNLOCK   = getInteger("org.walog.append.flushUnlock", 1);
-
     // Appender ID generator
     static final AtomicLong ID_GEN = new AtomicLong();
 
@@ -86,11 +79,12 @@ class NioAppender extends Thread implements AutoCloseable {
     private FileLock fileLock;
 
     public NioAppender(NioWaler waler) {
-        this(waler, (FLUSH_UNLOCK == 1), getAsyncMode(), QUEUE_SIZE, BATCH_SIZE);
+        this(waler, (AppendOptions.FLUSH_UNLOCK == 1), getAsyncMode(),
+                AppendOptions.QUEUE_SIZE, AppendOptions.BATCH_SIZE);
     }
 
     public NioAppender(NioWaler waler, boolean flushUnlock, int asyncMode) {
-        this(waler, flushUnlock, asyncMode, QUEUE_SIZE, BATCH_SIZE);
+        this(waler, flushUnlock, asyncMode, AppendOptions.QUEUE_SIZE, AppendOptions.BATCH_SIZE);
     }
 
     public NioAppender(NioWaler waler, boolean flushUnlock, int asyncMode, int queueSize, int batchSize) {
@@ -121,12 +115,12 @@ class NioAppender extends Thread implements AutoCloseable {
             if (isAsyncMode()) {
                 final boolean offered;
                 // Try to append into queue
-                if (APPEND_TIMEOUT <= 0) {
+                if (AppendOptions.APPEND_TIMEOUT <= 0) {
                     this.appendQueue.put(item);
                     offered = true;
                 } else {
-                    item.expiryTime = System.currentTimeMillis() + APPEND_TIMEOUT;
-                    offered = this.appendQueue.offer(item, APPEND_TIMEOUT, MILLISECONDS);
+                    item.expiryTime = System.currentTimeMillis() + AppendOptions.APPEND_TIMEOUT;
+                    offered = this.appendQueue.offer(item, AppendOptions.APPEND_TIMEOUT, MILLISECONDS);
                 }
                 if (offered) {
                     // Check again: appender may be closed before enqueued
@@ -136,12 +130,12 @@ class NioAppender extends Thread implements AutoCloseable {
             } else {
                 if (item.tryRun()) {
                     final boolean acquired;
-                    if (APPEND_TIMEOUT <= 0) {
+                    if (AppendOptions.APPEND_TIMEOUT <= 0) {
                         this.appendLock.lock();
                         acquired = true;
                     } else {
-                        item.expiryTime = System.currentTimeMillis() + APPEND_TIMEOUT;
-                        acquired = this.appendLock.tryLock(APPEND_TIMEOUT, MILLISECONDS);
+                        item.expiryTime = System.currentTimeMillis() + AppendOptions.APPEND_TIMEOUT;
+                        acquired = this.appendLock.tryLock(AppendOptions.APPEND_TIMEOUT, MILLISECONDS);
                     }
                     if (acquired) {
                         try {
@@ -227,8 +221,8 @@ class NioAppender extends Thread implements AutoCloseable {
             if (this.appended && isAutoFlush() && isFlushTime()) {
                 IoUtils.debug("Auto flush start");
                 AppendItem<?> sync = new AppendItem<>(AppendItem.TAG_SYNC);
-                if (APPEND_TIMEOUT > 0) {
-                    sync.expiryTime = System.currentTimeMillis() + APPEND_TIMEOUT;
+                if (AppendOptions.APPEND_TIMEOUT > 0) {
+                    sync.expiryTime = System.currentTimeMillis() + AppendOptions.APPEND_TIMEOUT;
                 }
                 try {
                     sync.tryRun();
@@ -256,7 +250,8 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected boolean isFlushTime() {
-        return (FLUSH_PERIOD <= 0 || System.currentTimeMillis()-this.syncTime >= FLUSH_PERIOD);
+        return (AppendOptions.FLUSH_PERIOD <= 0 ||
+                System.currentTimeMillis()-this.syncTime >= AppendOptions.FLUSH_PERIOD);
     }
 
     protected void handle(AppendItem<?> item, boolean syncAppend) throws IOException {
@@ -493,7 +488,7 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected FileLock acquireFileLock(AppendItem<?> appendItem) throws IOException {
-        if (APPEND_TIMEOUT <= 0) {
+        if (AppendOptions.APPEND_TIMEOUT <= 0) {
             for (;;) {
                 final FileLock lock = this.lockChan.lock();
                 if (lock != null) {
@@ -627,7 +622,7 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected static boolean isAutoFlush() {
-        return (AUTO_FLUSH == 1);
+        return (AppendOptions.AUTO_FLUSH == 1);
     }
 
     protected static int getAsyncMode() {

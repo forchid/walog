@@ -24,14 +24,20 @@
 
 package org.walog;
 
-public class NodeWalException extends WalException {
+import java.util.Properties;
 
-    public NodeWalException(String message) {
-        super(message);
-    }
+/**
+ * A wal driver that builds a waler to the specified URL.
+ *
+ * @since 2020-05-14
+ * @author little-pan
+ */
+public interface WalDriver {
 
-    public NodeWalException(String message, Throwable cause) {
-        super(message, cause);
-    }
+    String URL_PREFIX = "walog:";
+
+    <T extends Waler> T connect(String url, Properties info) throws WalException;
+
+    boolean acceptsURL(String url);
 
 }

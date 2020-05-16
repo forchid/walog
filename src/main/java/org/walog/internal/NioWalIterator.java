@@ -24,10 +24,7 @@
 
 package org.walog.internal;
 
-import org.walog.IOWalException;
-import org.walog.SimpleWal;
-import org.walog.WalException;
-import org.walog.WalIterator;
+import org.walog.*;
 import org.walog.util.IoUtils;
 import org.walog.util.WalFileUtils;
 
@@ -97,7 +94,7 @@ class NioWalIterator implements WalIterator {
                     this.noNext = true;
                     return false;
                 }
-                this.lsn = this.wal.nextLsn();
+                batchFetch();
                 return true;
             }
 
@@ -121,13 +118,13 @@ class NioWalIterator implements WalIterator {
                     return false;
                 }
                 if (this.wal != null) {
-                    this.lsn = this.wal.nextLsn();
+                    batchFetch();
                     failed = false;
                     return true;
                 }
             }
 
-            this.wal = this.walFile.get(this.lsn);
+            this.wal = get(this.lsn);
             if (this.wal == null) {
                 this.walFile.release();
                 // Open next wal file
@@ -138,11 +135,11 @@ class NioWalIterator implements WalIterator {
                     failed = false;
                     return false;
                 }
-                this.wal = this.walFile.get(this.lsn);
+                this.wal = get(this.lsn);
             }
 
             if (this.wal != null) {
-                this.lsn = this.wal.nextLsn();
+                batchFetch();
                 failed = false;
                 return true;
             }
@@ -159,6 +156,10 @@ class NioWalIterator implements WalIterator {
                 return false;
             }
             throw new IOWalException(e);
+        } catch (TimeoutWalException e) {
+            // It's valid if timeout
+            failed = false;
+            throw e;
         } catch (IOException e) {
             throw new IOWalException(e);
         } finally {
@@ -166,6 +167,39 @@ class NioWalIterator implements WalIterator {
                 close();
             }
         }
+    }
+
+    protected void batchFetch() {
+        final int n = this.waler.fetchSize;
+        SimpleWal curr = this.wal;
+        final SimpleWal last = curr.getLast();
+
+        if (n > 0) {
+            SimpleWal next = curr;
+            for (int i = 0; i < n; ++i) {
+                next = this.waler.next(next, false);
+                if (next == null) {
+                    break;
+                }
+                if (last.getLsn() >= next.getLsn()) {
+                    next.setLast(last);
+                } else {
+                    next.setLast(next);
+                }
+                this.wal.append(curr = next);
+            }
+        }
+
+        this.lsn = curr.nextLsn();
+    }
+
+    protected SimpleWal get(long lsn) throws IOException {
+        SimpleWal wal = this.walFile.get(lsn);
+
+        if (this.waler.fetchLast && wal != null) {
+            wal.setLast(this.waler.last());
+        }
+        return wal;
     }
 
     @Override
@@ -178,9 +212,15 @@ class NioWalIterator implements WalIterator {
             throw new NoSuchElementException();
         }
 
-        this.last = this.wal;
+        final SimpleWal curr = this.wal;
+        SimpleWal last = curr.nextLast();
+        if (last == null) {
+            last = this.wal;
+        }
+        this.last = last;
         this.wal = null;
-        return this.last;
+
+        return curr;
     }
 
     @Override

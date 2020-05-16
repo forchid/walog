@@ -26,11 +26,22 @@ package org.walog;
 
 import org.walog.util.WalFileUtils;
 
-public class SimpleWal implements Wal {
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+
+public class SimpleWal implements Wal, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     protected final long lsn;
     final byte prefix;
     protected final byte[] data;
+
+    protected SimpleWal last;
+    protected List<SimpleWal> nextList;
 
     public SimpleWal(long lsn, byte prefix, byte[] data) {
         this.lsn = lsn;
@@ -113,6 +124,41 @@ public class SimpleWal implements Wal {
     @Override
     public byte[] getData() {
         return this.data;
+    }
+
+    @Override
+    public SimpleWal getLast() {
+        return this.last;
+    }
+
+    public void setLast(SimpleWal last) {
+        this.last = last;
+    }
+
+    public void append(SimpleWal next) {
+        if (next != null) {
+            if (this.nextList == null) {
+                this.nextList = new ArrayList<>();
+            }
+            this.nextList.add(next);
+        }
+    }
+
+    public Iterator<SimpleWal> iterator() {
+        if (this.nextList == null) {
+            return Collections.emptyIterator();
+        } else {
+            return this.nextList.iterator();
+        }
+    }
+
+    public SimpleWal nextLast() {
+        final int n;
+        if (this.nextList == null || (n = this.nextList.size()) == 0) {
+            return null;
+        } else {
+            return this.nextList.get(n - 1);
+        }
     }
 
     @Override

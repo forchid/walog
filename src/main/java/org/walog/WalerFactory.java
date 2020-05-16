@@ -27,7 +27,6 @@ package org.walog;
 import java.io.*;
 
 import org.walog.internal.NioWaler;
-import org.walog.util.IoUtils;
 
 /**
  * @author little-pan
@@ -46,27 +45,31 @@ public class WalerFactory {
         return open(new File(dir));
     }
 
-    public static Waler open(File dir, WalSlave slave) throws WalException {
-        if (slave == null) {
-            throw new NullPointerException("slave must be given");
-        }
-
-        final NioWaler waler = new NioWaler(dir, slave);
-        waler.open();
-        boolean failed = true;
-        try {
-            slave.open(waler);
-            failed = false;
-            return waler;
-        } finally {
-            if (failed) {
-                IoUtils.close(waler);
-            }
-        }
+    public static Waler open(String dir, boolean fetchLast) throws WalException {
+        return open(dir, 0, fetchLast);
     }
 
-    public static Waler open(String dir, WalSlave slave) throws WalException {
-        return open(new File(dir), slave);
+    public static Waler open(String dir, int fetchSize, boolean fetchLast) throws WalException {
+        AppendOptions options = AppendOptions.builder().build();
+        return open(new File(dir), options, fetchSize, fetchLast);
+    }
+
+    public static Waler open(File dir, AppendOptions options) throws WalException {
+        return open(dir, options, 0,false);
+    }
+
+    public static Waler open(String dir, AppendOptions options) throws WalException {
+        return open(dir, options, false);
+    }
+
+    public static Waler open(File dir, AppendOptions options, int fetchSize, boolean fetchLast) throws WalException {
+        final Waler waler = new NioWaler(dir, options, fetchSize, fetchLast);
+        waler.open();
+        return waler;
+    }
+
+    public static Waler open(String dir, AppendOptions options, boolean fetchLast) throws WalException {
+        return open(new File(dir), options, 0, fetchLast);
     }
 
 }
