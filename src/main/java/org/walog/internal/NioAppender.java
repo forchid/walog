@@ -24,12 +24,10 @@
 
 package org.walog.internal;
 
-import org.walog.IOWalException;
-import org.walog.InterruptedWalException;
-import org.walog.TimeoutWalException;
-import org.walog.WalException;
+import org.walog.*;
 import org.walog.util.IoUtils;
-import org.walog.util.WalFileUtils;
+
+import static org.walog.util.WalFileUtils.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -56,22 +54,17 @@ import static java.lang.Integer.getInteger;
  */
 class NioAppender extends Thread implements AutoCloseable {
 
-    static int QUEUE_SIZE     = getInteger("org.walog.append.queueSize", 128);
-    static int BATCH_SIZE     = getInteger("org.walog.append.batchSize", 128);
-    static int APPEND_TIMEOUT = getInteger("org.walog.append.timeout", 50000);
-    static int AUTO_FLUSH     = getInteger("org.walog.append.autoFlush", 1);
-    static int FLUSH_PERIOD   = getInteger("org.walog.append.flushPeriod", 100);
-    static int FLUSH_UNLOCK   = getInteger("org.walog.append.flushUnlock", 1);
-
     // Appender ID generator
     static final AtomicLong ID_GEN = new AtomicLong();
 
     // Basic states
     private final int asyncMode;
+    protected final boolean flushUnlock;
     private volatile boolean open;
     protected boolean appended;
     protected long syncTime;
     protected final NioWaler waler;
+    private SimpleWal lastWal;
 
     // Batch properties
     protected final BlockingQueue<AppendItem<?>> appendQueue;
@@ -86,11 +79,17 @@ class NioAppender extends Thread implements AutoCloseable {
     private FileLock fileLock;
 
     public NioAppender(NioWaler waler) {
-        this(waler, QUEUE_SIZE, BATCH_SIZE);
+        this(waler, (AppendOptions.FLUSH_UNLOCK == 1), getAsyncMode(),
+                AppendOptions.QUEUE_SIZE, AppendOptions.BATCH_SIZE);
     }
 
-    public NioAppender(NioWaler waler, int queueSize, int batchSize) {
-        this.asyncMode = getInteger("org.walog.append.asyncMode", 1);
+    public NioAppender(NioWaler waler, boolean flushUnlock, int asyncMode) {
+        this(waler, flushUnlock, asyncMode, AppendOptions.QUEUE_SIZE, AppendOptions.BATCH_SIZE);
+    }
+
+    public NioAppender(NioWaler waler, boolean flushUnlock, int asyncMode, int queueSize, int batchSize) {
+        this.asyncMode = asyncMode;
+        this.flushUnlock = flushUnlock;
         if (queueSize < 1) {
             throw new IllegalArgumentException("queueSize: " + queueSize);
         }
@@ -116,12 +115,12 @@ class NioAppender extends Thread implements AutoCloseable {
             if (isAsyncMode()) {
                 final boolean offered;
                 // Try to append into queue
-                if (APPEND_TIMEOUT <= 0) {
+                if (AppendOptions.APPEND_TIMEOUT <= 0) {
                     this.appendQueue.put(item);
                     offered = true;
                 } else {
-                    item.expiryTime = System.currentTimeMillis() + APPEND_TIMEOUT;
-                    offered = this.appendQueue.offer(item, APPEND_TIMEOUT, MILLISECONDS);
+                    item.expiryTime = System.currentTimeMillis() + AppendOptions.APPEND_TIMEOUT;
+                    offered = this.appendQueue.offer(item, AppendOptions.APPEND_TIMEOUT, MILLISECONDS);
                 }
                 if (offered) {
                     // Check again: appender may be closed before enqueued
@@ -131,12 +130,12 @@ class NioAppender extends Thread implements AutoCloseable {
             } else {
                 if (item.tryRun()) {
                     final boolean acquired;
-                    if (APPEND_TIMEOUT <= 0) {
+                    if (AppendOptions.APPEND_TIMEOUT <= 0) {
                         this.appendLock.lock();
                         acquired = true;
                     } else {
-                        item.expiryTime = System.currentTimeMillis() + APPEND_TIMEOUT;
-                        acquired = this.appendLock.tryLock(APPEND_TIMEOUT, MILLISECONDS);
+                        item.expiryTime = System.currentTimeMillis() + AppendOptions.APPEND_TIMEOUT;
+                        acquired = this.appendLock.tryLock(AppendOptions.APPEND_TIMEOUT, MILLISECONDS);
                     }
                     if (acquired) {
                         try {
@@ -222,8 +221,8 @@ class NioAppender extends Thread implements AutoCloseable {
             if (this.appended && isAutoFlush() && isFlushTime()) {
                 IoUtils.debug("Auto flush start");
                 AppendItem<?> sync = new AppendItem<>(AppendItem.TAG_SYNC);
-                if (APPEND_TIMEOUT > 0) {
-                    sync.expiryTime = System.currentTimeMillis() + APPEND_TIMEOUT;
+                if (AppendOptions.APPEND_TIMEOUT > 0) {
+                    sync.expiryTime = System.currentTimeMillis() + AppendOptions.APPEND_TIMEOUT;
                 }
                 try {
                     sync.tryRun();
@@ -251,7 +250,8 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected boolean isFlushTime() {
-        return (FLUSH_PERIOD <= 0 || System.currentTimeMillis()-this.syncTime >= FLUSH_PERIOD);
+        return (AppendOptions.FLUSH_PERIOD <= 0 ||
+                System.currentTimeMillis()-this.syncTime >= AppendOptions.FLUSH_PERIOD);
     }
 
     protected void handle(AppendItem<?> item, boolean syncAppend) throws IOException {
@@ -273,6 +273,9 @@ class NioAppender extends Thread implements AutoCloseable {
                 case AppendItem.TAG_CLEAR:
                     clear(item);
                     break;
+                case AppendItem.TAG_FLAST:
+                    fetchLast(item);
+                    break;
                 case AppendItem.TAG_END:
                     // Ignore
                     break;
@@ -287,6 +290,19 @@ class NioAppender extends Thread implements AutoCloseable {
                 close();
             }
         }
+    }
+
+    protected void fetchLast(AppendItem<?> item) throws IOException {
+        if (item.isCompleted()) {
+            return;
+        }
+        SimpleWal wal = recovery(item);
+        if (item.isCompleted()) {
+            return;
+        }
+        checkFileLock();
+
+        item.setResult(wal);
     }
 
     protected void sync(AppendItem<?> item) throws IOException {
@@ -312,7 +328,7 @@ class NioAppender extends Thread implements AutoCloseable {
 
     protected void purgeTo(AppendPurgeToItem item) {
         File dir = this.waler.getDirectory();
-        File[] files = WalFileUtils.listFilesTo(dir, true, item.filename);
+        File[] files = listFilesTo(dir, true, item.filename);
         for (File file: files) {
             IoUtils.debug("Purge wal file '%s'", file);
             if (file.exists() && !file.delete()) {
@@ -337,14 +353,14 @@ class NioAppender extends Thread implements AutoCloseable {
 
         // Prepare
         // - Close old append file
-        long nextFileLsn = WalFileUtils.nextFileLsn(this.appendFile.lsn);
-        String nextFilename = WalFileUtils.filename(nextFileLsn);
+        long nextFileLsn = nextFileLsn(this.appendFile.lsn);
+        String nextFilename = filename(nextFileLsn);
         File nextFile = this.waler.newFile(nextFilename);
         IoUtils.close(this.appendFile);
 
         // - Create a new append file
         File dir = this.waler.getDirectory();
-        File[] files = WalFileUtils.listFiles(dir, true);
+        File[] files = listFiles(dir, true);
         this.appendFile = new NioWalFile(nextFile);
 
         // Remove all previous files(include old append file)
@@ -366,12 +382,14 @@ class NioAppender extends Thread implements AutoCloseable {
 
         // Try to recovery
         boolean ok = false;
-        for (AppendItem<?> item: this.batchItems) {
+        AppendPayloadItem first = null;
+        for (AppendPayloadItem item: this.batchItems) {
             if (!item.isCompleted()) {
                 recovery(item);
                 if (item.isCompleted()) {
                     return;
                 }
+                first = item;
                 ok = true;
                 break;
             }
@@ -380,12 +398,23 @@ class NioAppender extends Thread implements AutoCloseable {
             this.batchItems.clear();
             return;
         }
-        if (this.appendFile.size() >= WalFileUtils.ROLL_SIZE) {
+
+        // Roll file
+        if (first instanceof AppendWalItem) {
+            AppendWalItem item = (AppendWalItem)first;
+            SimpleWal wal = item.wal;
+            long curr = this.appendFile.getLsn();
+            long next = fileLsn(wal.getLsn());
+            if (curr != next) {
+                rollFile(curr, next);
+            }
+        }
+        if (this.appendFile.size() >= ROLL_SIZE) {
             rollFile();
         }
 
         checkFileLock();
-        this.appendFile.append(this.batchItems);
+        this.lastWal = this.appendFile.append(this.batchItems);
         this.batchItems.clear();
         this.appended = true;
     }
@@ -398,10 +427,10 @@ class NioAppender extends Thread implements AutoCloseable {
         }
     }
 
-    protected void recovery(AppendItem<?> appendItem) throws IOException {
+    protected SimpleWal recovery(AppendItem<?> appendItem) throws IOException {
         final FileLock fileLock = this.fileLock;
         if (fileLock != null && fileLock.isValid()) {
-            return;
+            return this.lastWal;
         }
 
         final FileChannel lockChan = this.lockChan;
@@ -427,16 +456,30 @@ class NioAppender extends Thread implements AutoCloseable {
             if (appendFileLock == null) {
                 throw new IllegalStateException("'append file lock' null");
             }
+
             final File dir = this.waler.getDirectory();
-            File lastFile = WalFileUtils.lastFile(dir);
-            if (lastFile == null) {
-                String name = WalFileUtils.filename(0L);
-                lastFile = new File(dir, name);
+            for (;;) {
+                File lastFile = lastFile(dir);
+                if (lastFile == null) {
+                    String name = filename(0L);
+                    lastFile = new File(dir, name);
+                }
+                this.appendFile = new NioWalFile(lastFile);
+                final SimpleWal last = this.appendFile.recovery();
+                if (last != null || lastFile.equals(firstFile(dir))) {
+                    this.lastWal = last;
+                    break;
+                }
+                IoUtils.close(this.appendFile);
+                if (!lastFile.delete()) {
+                    throw new IOException("Can't delete file '" + lastFile + "'");
+                }
             }
-            this.appendFile = new NioWalFile(lastFile);
-            this.appendFile.recovery();
+
             this.fileLock = appendFileLock;
             failed = false;
+
+            return this.lastWal;
         } finally {
             if (failed) {
                 releaseFileLock(appendFileLock);
@@ -445,7 +488,7 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected FileLock acquireFileLock(AppendItem<?> appendItem) throws IOException {
-        if (APPEND_TIMEOUT <= 0) {
+        if (AppendOptions.APPEND_TIMEOUT <= 0) {
             for (;;) {
                 final FileLock lock = this.lockChan.lock();
                 if (lock != null) {
@@ -478,22 +521,38 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected void rollFile() throws IOException {
-        final long last = this.appendFile.getLsn();
-        final long lsn = WalFileUtils.nextFileLsn(last);
-        if (lsn < 0L) {
+        long curr = this.appendFile.getLsn();
+        long next = nextFileLsn(curr);
+        rollFile(curr, next);
+    }
+
+    protected void rollFile(final long curr, final long next) throws IOException {
+        if (next < 0L) {
             throw new IOException("lsn full");
         }
         checkFileLock();
         this.appendFile.sync();
+        long size = this.appendFile.size();
         IoUtils.close(this.appendFile);
 
-        IoUtils.debug("roll wal file: lsn 0x%x -> 0x%x", last, lsn);
-        final String name = WalFileUtils.filename(lsn);
+        if (next != nextFileLsn(curr)) {
+            // Handle skip file
+            final File lastFile = this.appendFile.file;
+            if (size != 0) {
+                throw new IOException("Can't roll file '" + lastFile + "': size " + size);
+            }
+            if (!lastFile.delete()) {
+                throw new IOException("Can't delete file '" + lastFile + "'");
+            }
+        }
+
+        IoUtils.debug("roll wal file: lsn 0x%x -> 0x%x", curr, next);
+        final String name = filename(next);
         final File dir = this.waler.getDirectory();
         final File lastFile = new File(dir, name);
         this.appendFile = new NioWalFile(lastFile);
         if (this.appendFile.size() != 0L) {
-            throw new IllegalStateException(lastFile + " not a empty file");
+            throw new IllegalStateException("'"+ lastFile + "' not a empty file");
         }
         IoUtils.debug("roll wal file to '%s' in '%s'", name, dir);
     }
@@ -558,12 +617,16 @@ class NioAppender extends Thread implements AutoCloseable {
         return (this.asyncMode == 1);
     }
 
-    protected static boolean isAutoFlush() {
-        return (AUTO_FLUSH == 1);
+    protected boolean isFlushUnlock() {
+        return this.flushUnlock;
     }
 
-    protected static boolean isFlushUnlock() {
-        return (FLUSH_UNLOCK == 1);
+    protected static boolean isAutoFlush() {
+        return (AppendOptions.AUTO_FLUSH == 1);
+    }
+
+    protected static int getAsyncMode() {
+        return getInteger("org.walog.append.asyncMode", 1);
     }
 
 }

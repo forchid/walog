@@ -162,4 +162,44 @@ public final class IoUtils {
         println("INFO ", out, format, args);
     }
 
+    public static boolean isDebugEnabled() {
+        return debug;
+    }
+
+    public static String dumpHex(ByteBuffer buffer) {
+        ByteBuffer s = buffer.slice();
+        int rem = s.remaining();
+        int cap = (rem * 4) + (rem / 16) + 1;
+        StringBuilder sb = new StringBuilder(cap);
+        int i = 0, c = 0;
+        byte[] buf = new byte[16];
+
+        while (s.hasRemaining()) {
+            byte b = s.get();
+            sb.append(String.format(" %02x", b));
+            buf[i++] = b;
+            ++c;
+            if (i % 16 == 0 || c == rem) {
+                sb.append("  ");
+                if (c == rem) {
+                    for (int j = i; j < 16; ++j) {
+                        sb.append("   ");
+                    }
+                }
+                for (int j = 0; j < i; ++j) {
+                    b = buf[j];
+                    if (b >= 0x20 && b <= 0x7e) {
+                        sb.append((char)b);
+                    } else {
+                        sb.append('.');
+                    }
+                }
+                sb.append('\n');
+                i = 0;
+            }
+        }
+
+        return sb.toString();
+    }
+
 }

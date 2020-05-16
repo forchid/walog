@@ -1,9 +1,11 @@
 # walog
-A simple and high performance WAL implementation, supports multi-thread or multi-process iterating/appending log.
+A simple and high performance standalone or replication WAL implementation, supports multi-thread 
+or multi-process iterating/appending log.
 - Single thread appends 200,000+ items per second, iterates 1000,000+ items per second
 - Support multi-processes iterate/append logs
 - Simple API such as append(log)/first()/get(lsn)/next(log)/iterator()/iterator(lsn)/sync() etc
 - Require JDK 7+
+- Provide wal master/slave replication framework, and in-process/rmi implementations
 
 ## examples
 - Open wal logger

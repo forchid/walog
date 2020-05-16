@@ -46,18 +46,34 @@ public class NioWaler implements Waler {
     private volatile boolean open;
 
     protected final File dir;
+    protected final int fetchSize;
+    protected final boolean fetchLast;
+
     // file lsn -> wal file
     protected final LruCache<Long, NioWalFile> walCache;
+    protected final AppendOptions appendOptions;
     private final Object appenderInitLock = new Object();
     private volatile NioAppender appender;
+
 
     /** Create a WAL logger under the specified directory
      * 
      * @param dir the logger directory
      */
     public NioWaler(File dir) {
+        this(dir, null, 0, false);
+    }
+
+    public NioWaler(File dir, AppendOptions appendOptions) {
+        this(dir, appendOptions, 0, false);
+    }
+
+    public NioWaler(File dir, AppendOptions appendOptions, int fetchSize, boolean fetchLast) {
         this.dir = dir;
         this.walCache = new LruCache<>(WalFileUtils.CACHE_SIZE);
+        this.appendOptions = appendOptions;
+        this.fetchLast = fetchLast;
+        this.fetchSize = fetchSize;
     }
     
     @Override
@@ -98,6 +114,7 @@ public class NioWaler implements Waler {
 
     protected Wal append(byte[] log, boolean copy) throws WalException {
         ensureOpen();
+
         if (copy) {
             log = Arrays.copyOf(log, log.length);
         }
@@ -111,7 +128,14 @@ public class NioWaler implements Waler {
         if (appender == null) {
             synchronized (this.appenderInitLock) {
                 if (this.appender == null) {
-                    this.appender = new NioAppender(this);
+                    if (this.appendOptions == null) {
+                        this.appender = new NioAppender(this);
+                    } else {
+                        AppendOptions options = this.appendOptions;
+                        this.appender = new NioAppender(this, options.isFlushUnlock(),
+                                options.getAsyncMode(), options.getQueueSize(), options.getBatchSize());
+                    }
+
                     boolean failed = true;
                     try {
                         this.appender.start();
@@ -140,7 +164,11 @@ public class NioWaler implements Waler {
                 return null;
             }
 
-            return walFile.get(0);
+            SimpleWal wal = walFile.get(0);
+            if (this.fetchLast && wal != null) {
+                wal.setLast(last());
+            }
+            return wal;
         } catch (EOFException e) {
             // No more or partial wal
             if (walFile != null && walFile.isLastFile()) {
@@ -206,6 +234,10 @@ public class NioWaler implements Waler {
 
     @Override
     public SimpleWal get(long lsn) throws WalException, IllegalArgumentException {
+        return get(lsn, this.fetchLast);
+    }
+
+    SimpleWal get(long lsn, boolean fetchLast) throws WalException, IllegalArgumentException {
         checkLsn(lsn);
         ensureOpen();
 
@@ -220,7 +252,11 @@ public class NioWaler implements Waler {
             }
 
             int offset = WalFileUtils.fileOffset(lsn);
-            return walFile.get(offset);
+            SimpleWal wal = walFile.get(offset);
+            if (fetchLast && wal != null) {
+                wal.setLast(last());
+            }
+            return wal;
         } catch (EOFException e) {
             // No more wal or partial wal
             if (walFile != null && walFile.isLastFile()) {
@@ -247,14 +283,23 @@ public class NioWaler implements Waler {
         return next(wal, -1L);
     }
 
+    SimpleWal next(Wal wal, boolean fetchLast) throws WalException, IllegalArgumentException {
+        return next(wal, -1L, fetchLast);
+    }
+
     @Override
     public SimpleWal next(final Wal wal, final long timeout) throws WalException, IllegalArgumentException {
-        SimpleWal w;
+        return next(wal, timeout, this.fetchLast);
+    }
 
+    SimpleWal next(final Wal wal, final long timeout, boolean fetchLast)
+            throws WalException, IllegalArgumentException {
+
+        SimpleWal w;
         if (wal instanceof SimpleWal) {
             w = (SimpleWal)wal;
             long nextLsn = w.nextLsn();
-            w = get(nextLsn);
+            w = get(nextLsn, fetchLast);
             if (w != null) {
                 return w;
             }
@@ -274,7 +319,7 @@ public class NioWaler implements Waler {
                     File last = WalFileUtils.lastFile(this.dir, filename);
                     if (!file.equals(last)) {
                         nextLsn = WalFileUtils.nextFileLsn(wal.getLsn());
-                        w = get(nextLsn);
+                        w = get(nextLsn, fetchLast);
                     }
                     if (w != null || timeout < 0L) {
                         return w;
@@ -284,7 +329,7 @@ public class NioWaler implements Waler {
                     if (watchService == null) {
                         watchService = regWatchService();
                         // Retry get after register watcher
-                        w = get(nextLsn);
+                        w = get(nextLsn, fetchLast);
                         if (w != null) {
                             return w;
                         }
@@ -305,7 +350,7 @@ public class NioWaler implements Waler {
                         watchKey.reset();
                     }
 
-                    w = get(nextLsn);
+                    w = get(nextLsn, fetchLast);
                     if (w != null) {
                         return w;
                     }
@@ -441,6 +486,25 @@ public class NioWaler implements Waler {
         final NioAppender appender = getAppender();
         item = new AppendItem<>(AppendItem.TAG_SYNC);
         appender.append(item);
+    }
+
+    @Override
+    public SimpleWal last() throws WalException {
+        final AppendItem<SimpleWal> item;
+        ensureOpen();
+
+        final NioAppender appender = getAppender();
+        item = new AppendItem<>(AppendItem.TAG_FLAST);
+
+        return appender.append(item);
+    }
+
+    // Internal method
+    public Wal append(SimpleWal wal) throws WalException {
+        AppendPayloadItem item = new AppendWalItem(wal);
+        NioAppender appender = getAppender();
+
+        return appender.append(item);
     }
 
     protected void ensureOpen() throws WalException {

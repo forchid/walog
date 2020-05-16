@@ -24,19 +24,52 @@
 
 package org.walog.internal;
 
-import org.walog.SimpleWal;
-import org.walog.Wal;
+import org.walog.*;
+import org.walog.util.IoUtils;
 
-public class AppendPayloadItem extends AppendItem<Wal> {
+import java.util.Properties;
 
-    public final byte[] payload;
+public class FileWalDriver extends AbstractWalDriver {
 
-    protected SimpleWal wal;
-    protected boolean flushed;
+    static final String PREFIX = URL_PREFIX + "file:";
 
-    public AppendPayloadItem(byte[] payload) {
-        super(TAG_PAYLOAD);
-        this.payload = payload;
+    static {
+        WalDriver driver = new FileWalDriver();
+        WalDriverManager.registerDriver(driver);
+    }
+
+    protected FileWalDriver() {
+
+    }
+
+    @Override
+    public <T extends Waler> T connect(String url, Properties info) throws WalException {
+        if (!acceptsURL(url)) {
+            return null;
+        }
+
+        String path = url.substring(PREFIX.length());
+        int i = path.indexOf('?');
+        if (i != -1) {
+            path = path.substring(0, i);
+        }
+
+        Waler waler = WalerFactory.open(path);
+        boolean failed = true;
+        try {
+            T t = cast(waler);
+            failed = false;
+            return t;
+        } finally {
+            if (failed) {
+                IoUtils.close(waler);
+            }
+        }
+    }
+
+    @Override
+    protected String getPrefix() {
+        return PREFIX;
     }
 
 }

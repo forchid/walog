@@ -1,18 +1,18 @@
 /**
  * The MIT License (MIT)
- *
- * Copyright (c) 2019 little-pan
- *
+ * <p>
+ * Copyright (c) 2020 little-pan
+ * <p>
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- *
+ * <p>
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- *
+ * <p>
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,34 +24,26 @@
 
 package org.walog;
 
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
+import org.walog.util.IoUtils;
 
-/** The write-ahead log.
- * 
- * @author little-pan
- * @since 2019-12-22
- *
- */
-public interface Wal {
+public abstract class AbstractWalDriver implements WalDriver {
 
-    int LSN_OFFSET_MASK = 0x3fffffff;
+    protected AbstractWalDriver() {
 
-    Charset CHARSET = StandardCharsets.UTF_8;
+    }
 
-    /** The lowest 30 bits of the lsn is offset in WAL file, and
-     * the highest 34bits is the WAL file index.
-     *
-     * @return the WAL lsn
-     */
-    long getLsn();
-    
-    byte[] getData();
+    @SuppressWarnings("unchecked")
+    protected <T extends Waler> T cast(Waler waler) {
+        return (T)waler;
+    }
 
-    long nextLsn() throws WalException;
+    @Override
+    public boolean acceptsURL(String url) {
+        String prefix = getPrefix();
+        IoUtils.debug("prefix '%s', url '%s'", prefix, url);
+        return (url.startsWith(prefix));
+    }
 
-    long nextFileLsn();
-
-    Wal getLast();
+    protected abstract String getPrefix();
 
 }

@@ -36,6 +36,7 @@ public class AllTest extends Test {
     public static void main(String[] args) {
         for (int i = 0; i < iterates; ++i)
             new AllTest(i).test();
+        completed = true;
     }
 
     public AllTest(int iterate) {
@@ -61,6 +62,7 @@ public class AllTest extends Test {
         final int i = this.iterate;
 
         add(new IterateOnAppendTest(i))
+        .add(new ReplicateTest(i))
         .add(new WalerFactoryTest(i));
     }
 

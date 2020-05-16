@@ -1,18 +1,18 @@
 /**
  * The MIT License (MIT)
- *
- * Copyright (c) 2019 little-pan
- *
+ * <p>
+ * Copyright (c) 2020 little-pan
+ * <p>
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- *
+ * <p>
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- *
+ * <p>
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -22,36 +22,46 @@
  * SOFTWARE.
  */
 
-package org.walog;
+package org.walog.rmi;
 
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
+import org.walog.Wal;
+import org.walog.WalException;
+import org.walog.WalIterator;
 
-/** The write-ahead log.
- * 
- * @author little-pan
- * @since 2019-12-22
- *
- */
-public interface Wal {
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
 
-    int LSN_OFFSET_MASK = 0x3fffffff;
+public class WalIteratorWrapper extends UnicastRemoteObject implements RmiIteratorWrapper {
 
-    Charset CHARSET = StandardCharsets.UTF_8;
+    protected final WalIterator iterator;
 
-    /** The lowest 30 bits of the lsn is offset in WAL file, and
-     * the highest 34bits is the WAL file index.
-     *
-     * @return the WAL lsn
-     */
-    long getLsn();
-    
-    byte[] getData();
+    public WalIteratorWrapper(WalIterator iterator) throws RemoteException {
+        this.iterator = iterator;
+    }
 
-    long nextLsn() throws WalException;
+    @Override
+    public boolean hasNext() throws WalException, RemoteException {
+        return this.iterator.hasNext();
+    }
 
-    long nextFileLsn();
+    @Override
+    public Wal next() throws WalException, RemoteException {
+        return this.iterator.next();
+    }
 
-    Wal getLast();
+    @Override
+    public void remove() throws RemoteException {
+        this.iterator.remove();
+    }
+
+    @Override
+    public boolean isOpen() throws RemoteException {
+        return this.iterator.isOpen();
+    }
+
+    @Override
+    public void close() throws RemoteException {
+        this.iterator.close();
+    }
 
 }
