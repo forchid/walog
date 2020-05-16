@@ -1,15 +1,21 @@
 # walog
-A simple and high performance standalone or replication WAL implementation, supports multi-thread 
-or multi-process iterating/appending log.
+A simple and high performance standalone, client/server or master/slave replication WAL implementation, 
+supports multi-thread or multi-process iterating/appending log.
+
 - Single thread appends 200,000+ items per second, iterates 1000,000+ items per second
 - Support multi-processes iterate/append logs
 - Simple API such as append(log)/first()/get(lsn)/next(log)/iterator()/iterator(lsn)/sync() etc
 - Require JDK 7+
+- Support simple API of wal client/server arch
 - Provide wal master/slave replication framework, and in-process/rmi implementations
 
 ## examples
 - Open wal logger
 ```java
+    // Open a standalone wal logger
+    import org.walog.rmi.RmiWalServer;
+    import org.walog.*;
+    
     public class Test {
         public static void main(String[] args) {
             File dir = new File("./");
@@ -17,6 +23,24 @@ or multi-process iterating/appending log.
                 // iterate/append operations
             }
         }
+    }
+    
+    // Open a master/slave wal logger
+    public class Test {
+            public static void main(String[] args) {
+                // Boot a master server
+                String[] conf = {"-d", "./master"};
+                RmiWalServer.start(conf);
+                
+                // Connect to the master and replicate it
+                File dir = new File("./");
+                String url = "walog:rmi:slave://localhost/wal?dataDir=" + dir;
+                try(SlaveWaler slaveWaler = WalDriverManager.connect(url)){
+                    // iterate/append operations on master wal logger
+                    Waler master = slaveWaler.getMaster();
+                    // iterate/fetch operations on slave wal logger
+                }
+            }
     }
 ```
 - Append wal
