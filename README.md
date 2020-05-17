@@ -1,18 +1,18 @@
 # walog
-A simple and high performance standalone, client/server or master/slave replication WAL implementation, 
+A simple and high performance embedded, client/server or master/slave replication WAL implementation, 
 supports multi-thread or multi-process iterating/appending log.
 
 - Single thread appends 200,000+ items per second, iterates 1000,000+ items per second
 - Support multi-processes iterate/append logs
 - Simple API such as append(log)/first()/get(lsn)/next(log)/iterator()/iterator(lsn)/sync() etc
 - Require JDK 7+
-- Support simple API of wal client/server arch
+- Support same waler API for wal client/server arch
 - Provide wal master/slave replication framework, and in-process/rmi implementations
 
 ## examples
 - Open standalone/client-server/master-slave wal logger
 ```java
-    // Open a standalone wal logger
+    // Open a embedded wal logger
     import org.walog.rmi.RmiWalServer;
     import org.walog.*;
     
@@ -35,7 +35,7 @@ supports multi-thread or multi-process iterating/appending log.
                 // Connect to the server and append log into it and iterate from it
                 String url = "walog:rmi://localhost/wal";
                 try (Waler client = WalDriverManager.connect(url)) {
-                    // iterate/fetch operations on client wal logger
+                    // append/fetch operations on client wal logger
                 }
             }
     }
@@ -50,9 +50,9 @@ supports multi-thread or multi-process iterating/appending log.
                 // Connect to the master and replicate it
                 File dir = new File("./slave");
                 String url = "walog:rmi:slave://localhost/wal?dataDir=" + dir;
-                try (SlaveWaler slaveWaler = WalDriverManager.connect(url)) {
+                try (SlaveWaler slave = WalDriverManager.connect(url)) {
                     // iterate/append operations on master wal logger
-                    Waler master = slaveWaler.getMaster();
+                    Waler master = slave.getMaster();
                     // iterate/fetch operations on slave wal logger
                 }
             }
