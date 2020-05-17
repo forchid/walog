@@ -211,6 +211,8 @@ public class SlaveWaler implements Waler {
 
         protected final SlaveWaler slave;
         protected volatile Wal curr, last;
+        private boolean appended;
+        private long syncTime;
 
         public Replicator(SlaveWaler slave, Wal curr) {
             this.slave = slave;
@@ -273,6 +275,8 @@ public class SlaveWaler implements Waler {
                             if (curr == null || curr.getLsn() != wal.getLsn()) {
                                 slave.state = STATE_APPENDING;
                                 waler.append(wal);
+                                this.appended = true;
+                                trySync(waler);
                             }
                             slave.state = STATE_WAIT;
                             this.curr = wal;
@@ -283,6 +287,7 @@ public class SlaveWaler implements Waler {
                                 this.last = last;
                             }
                         }
+                        trySync(waler);
                     } catch (TimeoutWalException e) {
                         // Continue if timeout
                     }
@@ -302,6 +307,23 @@ public class SlaveWaler implements Waler {
             }
         }
 
+        void trySync(Waler waler) throws WalException {
+            if (this.appended && isAutoFlush() && isFlushTime()) {
+                waler.sync();
+                this.appended = false;
+                this.syncTime = System.currentTimeMillis();
+            }
+        }
+
+        boolean isFlushTime() {
+            long flushPeriod = AppendOptions.FLUSH_PERIOD;
+            return (flushPeriod <= 0 || System.currentTimeMillis() - this.syncTime >= flushPeriod);
+        }
+
+    }
+
+    static boolean isAutoFlush() {
+        return (AppendOptions.AUTO_FLUSH == 1);
     }
 
 }
