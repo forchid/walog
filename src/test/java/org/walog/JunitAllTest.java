@@ -35,6 +35,7 @@ public class JunitAllTest extends AllTest {
     @Test
     public void test() {
         super.test();
+        completed = true;
     }
 
 }
