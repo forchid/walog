@@ -44,8 +44,8 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
     static final int PORT = getInteger("org.walog.rmi.server.port", 1099);
     static final String DIR  = getProperty("org.walog.rmi.server.dataDir", "data");
     static final String NAME = getProperty("org.walog.rmi.server.service", "wal");
-    static final String USER = getProperty("org.walog.rmi.server.user", "");
-    static final String PASSWORD = getProperty("org.walog.rmi.server.password", "");
+    static final String USER = getProperty("org.walog.rmi.server.user");
+    static final String PASSWORD = getProperty("org.walog.rmi.server.password");
     static final int FETCH_SIZE = getInteger("org.walog.rmi.server.fetchSize", 64);
 
     public static void main(String[] args) throws Exception {
@@ -142,14 +142,19 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
 
     @Override
     public RmiWrapper connect(Properties info) throws RemoteException {
-        if (this.user != null && this.user.length() != 0) {
+        if (this.user != null || this.password != null) {
             if (info == null) {
+                // 0) Auth failed
                 return null;
             }
             String user = info.getProperty("user");
             String password = info.getProperty("password");
-            if (!this.user.equals(user) || !this.password.equals(password)) {
-                // Auth failed
+            if (this.user != null && !this.user.equalsIgnoreCase(user)) {
+                // 1) Auth failed
+                return null;
+            }
+            if (this.password != null && !this.password.equals(password)) {
+                // 2) Auth failed
                 return null;
             }
         }
