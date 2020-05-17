@@ -24,6 +24,7 @@
 
 package org.walog.rmi;
 
+import org.walog.SimpleWal;
 import org.walog.Wal;
 import org.walog.WalException;
 
@@ -34,7 +35,7 @@ public interface RmiIteratorWrapper extends Remote, AutoCloseable {
 
     boolean hasNext() throws WalException, RemoteException;
 
-    Wal next() throws WalException, RemoteException;
+    SimpleWal next() throws WalException, RemoteException;
 
     void remove() throws RemoteException;
 

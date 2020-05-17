@@ -24,16 +24,17 @@
 
 package org.walog.rmi;
 
-import org.walog.IOWalException;
-import org.walog.Wal;
-import org.walog.WalException;
-import org.walog.WalIterator;
+import org.walog.*;
 
 import java.rmi.RemoteException;
+import java.util.Iterator;
 
 public class RmiWalIterator implements WalIterator {
 
     protected final RmiIteratorWrapper wrapper;
+    // Optimize: batch iterate
+    protected Iterator<SimpleWal> nextIt;
+    private boolean hasNextCalled;
 
     public RmiWalIterator(RmiIteratorWrapper wrapper) {
         this.wrapper = wrapper;
@@ -42,6 +43,12 @@ public class RmiWalIterator implements WalIterator {
     @Override
     public boolean hasNext() throws WalException {
         try {
+            this.hasNextCalled = true;
+            Iterator<SimpleWal> nextIt = this.nextIt;
+            if (nextIt != null && nextIt.hasNext()) {
+                return true;
+            }
+            this.nextIt = null;
             return this.wrapper.hasNext();
         } catch (RemoteException e) {
             throw new IOWalException(e);
@@ -51,7 +58,19 @@ public class RmiWalIterator implements WalIterator {
     @Override
     public Wal next() throws WalException {
         try {
-            return this.wrapper.next();
+            if (!this.hasNextCalled) {
+                throw new IllegalStateException("haxNext() not called");
+            }
+            this.hasNextCalled = false;
+
+            Iterator<SimpleWal> nextIt = this.nextIt;
+            if (nextIt != null && nextIt.hasNext()) {
+                return nextIt.next();
+            } else {
+                SimpleWal next = this.wrapper.next();
+                this.nextIt = next.iterator();
+                return next;
+            }
         } catch (RemoteException e) {
             throw new IOWalException(e);
         }
@@ -59,11 +78,7 @@ public class RmiWalIterator implements WalIterator {
 
     @Override
     public void remove() {
-        try {
-            this.wrapper.remove();
-        } catch (RemoteException e) {
-            throw new IOWalException(e);
-        }
+        throw new UnsupportedOperationException("wal iterator read only");
     }
 
     @Override

@@ -24,7 +24,7 @@
 
 package org.walog.rmi;
 
-import org.walog.Wal;
+import org.walog.SimpleWal;
 import org.walog.WalException;
 import org.walog.WalIterator;
 
@@ -45,13 +45,13 @@ public class WalIteratorWrapper extends UnicastRemoteObject implements RmiIterat
     }
 
     @Override
-    public Wal next() throws WalException, RemoteException {
-        return this.iterator.next();
+    public SimpleWal next() throws WalException, RemoteException {
+        return (SimpleWal)this.iterator.next();
     }
 
     @Override
     public void remove() throws RemoteException {
-        this.iterator.remove();
+        throw new UnsupportedOperationException("wal iterator read only");
     }
 
     @Override

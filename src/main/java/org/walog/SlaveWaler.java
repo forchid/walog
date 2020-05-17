@@ -27,7 +27,6 @@ package org.walog;
 import org.walog.internal.NioWaler;
 import org.walog.util.IoUtils;
 
-import java.util.Iterator;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -261,42 +260,28 @@ public class SlaveWaler implements Waler {
                     try {
                         assert it != null;
                         while (it.hasNext()) {
-                            Iterator<SimpleWal> walIt = null;
-                            final SimpleWal wal = (SimpleWal) it.next();
-                            // Handle batch fetched
-                            do {
-                                final SimpleWal next;
-                                if (walIt == null) {
-                                    next = wal;
-                                } else {
-                                    next = walIt.next();
-                                }
-                                final Wal curr = this.curr;
+                            final SimpleWal wal = (SimpleWal)it.next();
+                            final Wal curr = this.curr;
 
-                                if (curr == null) {
-                                    assert fromWal != null;
-                                    if (fromWal.getLsn() != next.getLsn()) {
-                                        throw new WalException("First wal from master not matched");
-                                    }
-                                    fromWal = null;
+                            if (curr == null) {
+                                assert fromWal != null;
+                                if (fromWal.getLsn() != wal.getLsn()) {
+                                    throw new WalException("First wal from master not matched");
                                 }
-                                if (curr == null || curr.getLsn() != next.getLsn()) {
-                                    slave.state = STATE_APPENDING;
-                                    waler.append(next);
-                                }
-                                slave.state = STATE_WAIT;
-                                this.curr = next;
-                                final Wal last = this.curr.getLast();
-                                if (last == null) {
-                                    this.last = master.last();
-                                } else {
-                                    this.last = last;
-                                }
-
-                                if (walIt == null) {
-                                    walIt = wal.iterator();
-                                }
-                            } while (walIt.hasNext());
+                                fromWal = null;
+                            }
+                            if (curr == null || curr.getLsn() != wal.getLsn()) {
+                                slave.state = STATE_APPENDING;
+                                waler.append(wal);
+                            }
+                            slave.state = STATE_WAIT;
+                            this.curr = wal;
+                            final Wal last = this.curr.getLast();
+                            if (last == null) {
+                                this.last = master.last();
+                            } else {
+                                this.last = last;
+                            }
                         }
                     } catch (TimeoutWalException e) {
                         // Continue if timeout
