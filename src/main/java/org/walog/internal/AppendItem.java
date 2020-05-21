@@ -87,6 +87,8 @@ public class AppendItem<V> {
                 this.result = (V)result;
             }
         } else {
+            // Note: not running if this is in append-queue or a detached item!
+            tryRun();
             // Running -> error
             if (b = this.state.compareAndSet(1, 3)) {
                 this.cause = cause;
@@ -130,6 +132,26 @@ public class AppendItem<V> {
 
     public boolean isCompleted() {
         return (this.state.get() >= 2);
+    }
+
+    @Override
+    public String toString() {
+        switch (this.tag) {
+            case TAG_END:
+                return ">> end";
+            case TAG_SYNC:
+                return ">> sync";
+            case TAG_CLEAR:
+                return ">> clear";
+            case TAG_FLAST:
+                return ">> fetch_last";
+            case TAG_PAYLOAD:
+                return ">> payload";
+            case TAG_PURGE:
+                return ">> purge";
+            default:
+                throw new IllegalStateException("Unknown append tag: " + this.tag);
+        }
     }
 
 }

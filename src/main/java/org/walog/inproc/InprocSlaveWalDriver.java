@@ -73,7 +73,7 @@ public class InprocSlaveWalDriver extends AbstractWalDriver {
         SlaveWaler waler = null;
         boolean failed = true;
         try {
-            waler = new SlaveWaler(master, dataDir, params);
+            waler = new SlaveWaler(dataDir, params, master, masterURL, info);
             waler.open();
             failed = false;
             return cast(waler);

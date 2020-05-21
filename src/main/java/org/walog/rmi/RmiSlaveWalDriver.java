@@ -77,7 +77,7 @@ public class RmiSlaveWalDriver extends AbstractWalDriver {
         SlaveWaler waler = null;
         boolean failed = true;
         try {
-            waler = new SlaveWaler(master, dataDir, params);
+            waler = new SlaveWaler(dataDir, props, master, masterURL, info);
             waler.open();
             failed = false;
             return cast(waler);

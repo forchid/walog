@@ -128,12 +128,8 @@ public class LruCache<K, V extends AutoCloseable> implements AutoCloseable {
 
     @Override
     public void close() {
-        if (!isOpen()) {
-            return;
-        }
-
-        clear();
         this.open = false;
+        clear();
     }
 
 }
