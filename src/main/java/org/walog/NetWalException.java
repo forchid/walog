@@ -26,7 +26,7 @@ package org.walog;
 
 /** A wal exception that wraps network IO or remote call exception.
  *
- * @since 202-05-21
+ * @since 2020-05-21
  * @author little-pan
  */
 public class NetWalException extends WalException {
