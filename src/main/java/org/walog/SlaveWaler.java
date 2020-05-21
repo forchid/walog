@@ -38,22 +38,57 @@ public class SlaveWaler implements Waler {
     public static final int STATE_FAILED = 4;
     public static final int STATE_CLOSED = 8;
 
-    protected final Waler master;
+    protected volatile Waler waler;
     protected final String dataDir;
     protected final Properties props;
 
-    protected volatile NioWaler waler;
+    protected volatile Waler master;
+    protected final String masterURL;
+    protected final Properties masterInfo;
+
     protected volatile Replicator replicator;
     private volatile int state = STATE_INIT;
 
-    public SlaveWaler(Waler master, String dataDir, Properties props) {
+    public SlaveWaler(String dataDir, Properties props,
+                      Waler master, String masterURL, Properties masterInfo) {
         this.master  = master;
         this.dataDir = dataDir;
         this.props   = props;
+        this.masterURL = masterURL;
+        this.masterInfo = masterInfo;
     }
 
     public Waler getMaster() {
         return this.master;
+    }
+
+    protected Waler reopenMaster(long retryTimeout) throws WalException {
+        if (retryTimeout <= 0L) {
+            retryTimeout = 100L;
+        }
+
+        while (isOpen()) {
+            final Waler master;
+            try {
+                master = WalDriverManager.connect(this.masterURL, this.masterInfo);
+                if (master == null) {
+                    String s = "No wal driver found for master url: " + this.masterURL;
+                    throw new WalException(s);
+                }
+                return (this.master = master);
+            } catch (WalException e) {
+                if (!(e instanceof NetWalException)) {
+                    throw e;
+                }
+                try {
+                    Thread.sleep(retryTimeout);
+                } catch (InterruptedException ie) {
+                    throw new InterruptedWalException(ie);
+                }
+            }
+        }
+
+        throw new WalException("Slave waler closed");
     }
 
     public int getState() {
@@ -77,9 +112,21 @@ public class SlaveWaler implements Waler {
 
         AppendOptions options = AppendOptions.builder()
                 .asyncMode(0).flushUnlock(false).build();
-        this.waler  = (NioWaler)WalerFactory.open(this.dataDir, options);
+        // Fetch options
+        int fetchSize = 0;
+        boolean fetchLast = false;
+        String value = this.props.getProperty("fetchSize");
+        if (value != null) {
+            fetchSize = Integer.decode(value);
+        }
+        value = this.props.getProperty("fetchLast");
+        if (value != null) {
+            fetchLast = Boolean.parseBoolean(value);
+        }
+        this.waler  = WalerFactory.open(this.dataDir, options, fetchSize, fetchLast);
         Wal lastWal = this.waler.last();
         IoUtils.debug("slave last wal: %s", lastWal);
+
         // Start replicator
         this.replicator = new Replicator(this, lastWal);
         replicator.start();
@@ -233,77 +280,98 @@ public class SlaveWaler implements Waler {
         @Override
         public void run() {
             SlaveWaler slave = this.slave;
-            NioWaler waler = slave.waler;
+            NioWaler waler = (NioWaler)slave.waler;
             Waler master = slave.getMaster();
 
+            slave.state = STATE_WAIT;
+            WalIterator it = null;
+            long timeout = 1000;
             boolean failed = true;
             try {
-                slave.state = STATE_WAIT;
-                WalIterator it = null;
-                long timeout = 1000;
-
-                // Init "from wal"
-                Wal fromWal = this.curr;
-                while (slave.isOpen()) {
+                while (true) {
                     try {
-                        if (fromWal != null) {
-                            it = master.iterator(fromWal.getLsn(), timeout);
-                            break;
-                        }
-                        fromWal = master.first(timeout);
-                    } catch (TimeoutWalException e) {
-                        // Ignore
-                    }
-                }
-                this.last = master.last();
-
-                while (slave.isOpen()) {
-                    slave.state = STATE_WAIT;
-                    try {
-                        assert it != null;
-                        while (it.hasNext()) {
-                            final SimpleWal wal = (SimpleWal)it.next();
-                            final Wal curr = this.curr;
-
-                            if (curr == null) {
-                                assert fromWal != null;
-                                if (fromWal.getLsn() != wal.getLsn()) {
-                                    throw new WalException("First wal from master not matched");
+                        // Init "from wal"
+                        Wal fromWal = this.curr;
+                        while (slave.isOpen()) {
+                            try {
+                                if (fromWal != null) {
+                                    it = master.iterator(fromWal.getLsn(), timeout);
+                                    break;
                                 }
-                                fromWal = null;
-                            }
-                            if (curr == null || curr.getLsn() != wal.getLsn()) {
-                                slave.state = STATE_APPENDING;
-                                waler.append(wal);
-                                this.appended = true;
-                                trySync(waler);
-                            }
-                            slave.state = STATE_WAIT;
-                            this.curr = wal;
-                            final Wal last = this.curr.getLast();
-                            if (last == null) {
-                                this.last = master.last();
-                            } else {
-                                this.last = last;
+                                fromWal = master.first(timeout);
+                            } catch (TimeoutWalException e) {
+                                // Ignore
                             }
                         }
-                        trySync(waler);
-                    } catch (TimeoutWalException e) {
-                        // Continue if timeout
+                        this.last = master.last();
+
+                        while (slave.isOpen()) {
+                            slave.state = STATE_WAIT;
+                            try {
+                                assert it != null;
+                                while (it.hasNext()) {
+                                    final SimpleWal wal = (SimpleWal)it.next();
+                                    final Wal curr = this.curr;
+
+                                    if (curr == null) {
+                                        assert fromWal != null;
+                                        if (fromWal.getLsn() != wal.getLsn()) {
+                                            throw new WalException("First wal from master not matched");
+                                        }
+                                        fromWal = null;
+                                    }
+                                    if (curr == null || curr.getLsn() != wal.getLsn()) {
+                                        slave.state = STATE_APPENDING;
+                                        waler.append(wal);
+                                        this.appended = true;
+                                        trySync(waler);
+                                    }
+                                    slave.state = STATE_WAIT;
+                                    this.curr = wal;
+                                    final Wal last = this.curr.getLast();
+                                    if (last == null) {
+                                        this.last = master.last();
+                                    } else {
+                                        this.last = last;
+                                    }
+                                }
+                                trySync(waler);
+                            } catch (TimeoutWalException e) {
+                                // Continue if timeout
+                            }
+                        }
+                        slave.state = STATE_CLOSED;
+                        failed = false;
+                        return;
+                    } catch (WalException e) {
+                        IoUtils.close(it);
+                        if (slave.isOpen()) {
+                            try {
+                                if (master.isOpen() && !(e instanceof NetWalException)) {
+                                    throw e;
+                                }
+                            } catch (NetWalException ignore) {
+                                // Ignore remote call exception
+                            }
+                            slave.state = STATE_FAILED;
+                            IoUtils.close(master);
+                            master = slave.reopenMaster(timeout);
+                        } else {
+                            slave.state = STATE_CLOSED;
+                            failed = false;
+                            return;
+                        }
                     }
-                }
-                slave.state = STATE_CLOSED;
-                failed = false;
+                } // while
             } catch (WalException e) {
                 if (slave.isOpen()) {
                     throw e;
                 }
-                slave.state = STATE_CLOSED;
-                failed = false;
             } finally {
                 if (failed) {
                     slave.state = STATE_FAILED;
                 }
+                IoUtils.close(it);
             }
         }
 

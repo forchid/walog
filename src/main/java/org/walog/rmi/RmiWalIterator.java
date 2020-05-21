@@ -51,7 +51,7 @@ public class RmiWalIterator implements WalIterator {
             this.nextIt = null;
             return this.wrapper.hasNext();
         } catch (RemoteException e) {
-            throw new IOWalException(e);
+            throw new NetWalException("call hasNext() error", e);
         }
     }
 
@@ -72,7 +72,7 @@ public class RmiWalIterator implements WalIterator {
                 return next;
             }
         } catch (RemoteException e) {
-            throw new IOWalException(e);
+            throw new NetWalException("call next() error", e);
         }
     }
 
@@ -86,7 +86,7 @@ public class RmiWalIterator implements WalIterator {
         try {
             return this.wrapper.isOpen();
         } catch (RemoteException e) {
-            throw new IOWalException(e);
+            throw new NetWalException("call isOpen() error", e);
         }
     }
 
@@ -95,7 +95,7 @@ public class RmiWalIterator implements WalIterator {
         try {
             this.wrapper.close();
         } catch (RemoteException e) {
-            throw new IOWalException(e);
+            throw new NetWalException("call close() error", e);
         }
     }
 

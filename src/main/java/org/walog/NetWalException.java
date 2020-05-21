@@ -22,26 +22,21 @@
  * SOFTWARE.
  */
 
-package org.walog.internal;
+package org.walog;
 
-import org.walog.SimpleWal;
-import org.walog.Wal;
+/** A wal exception that wraps network IO or remote call exception.
+ *
+ * @since 202-05-21
+ * @author little-pan
+ */
+public class NetWalException extends WalException {
 
-public class AppendPayloadItem extends AppendItem<Wal> {
-
-    public final byte[] payload;
-
-    protected SimpleWal wal;
-    protected boolean flushed;
-
-    public AppendPayloadItem(byte[] payload) {
-        super(TAG_PAYLOAD);
-        this.payload = payload;
+    public NetWalException(String message) {
+        super(message);
     }
 
-    @Override
-    public String toString() {
-        return new String(this.payload, Wal.CHARSET);
+    public NetWalException(String message, Throwable cause) {
+        super(message, cause);
     }
 
 }

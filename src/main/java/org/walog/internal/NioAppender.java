@@ -570,8 +570,7 @@ class NioAppender extends Thread implements AutoCloseable {
             if (q != null) {
                 if (Thread.currentThread() != this && isAlive()) {
                     q.offer(AppendItem.END_ITEM);
-                }
-                if (q.size() > 0) {
+                } else if (q.size() > 0) {
                     Exception closed = new IOException("wal appender closed");
                     for (;;) {
                         final AppendItem<?> item = q.poll();

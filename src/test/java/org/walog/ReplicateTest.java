@@ -28,6 +28,8 @@ import org.walog.rmi.RmiWalServer;
 import org.walog.util.IoUtils;
 
 import java.io.File;
+import java.net.MalformedURLException;
+import java.rmi.RemoteException;
 import java.util.Properties;
 
 public class ReplicateTest extends Test {
@@ -37,6 +39,10 @@ public class ReplicateTest extends Test {
         completed = true;
     }
 
+    RmiWalServer rmiServer;
+    SlaveWaler slave;
+    Waler master;
+
     public ReplicateTest(int iterate) {
         super(iterate);
     }
@@ -45,25 +51,26 @@ public class ReplicateTest extends Test {
     protected void doTest() {
         int dataBaseLen = 36;
         int items = 1_000_000;
-        inprocTest(dataBaseLen, items);
+
+        inprocTest(dataBaseLen, items, false);
         cleanup();
-        remoteTest(dataBaseLen, items);
+        remoteTest(dataBaseLen, items, false);
         cleanup();
-        inprocTest(dataBaseLen, items);
+        inprocTest(dataBaseLen, items, false);
 
         dataBaseLen = (4 << 10) - 30;
         items = 1_00_000;
         cleanup();
-        inprocTest(dataBaseLen, items);
+        inprocTest(dataBaseLen, items, true);
         cleanup();
-        remoteTest(dataBaseLen, items);
+        remoteTest(dataBaseLen, items, true);
 
         dataBaseLen = 4 << 10;
         items = 1_00_000;
         cleanup();
-        inprocTest(dataBaseLen, items);
+        inprocTest(dataBaseLen, items, true);
         cleanup();
-        remoteTest(dataBaseLen, items);
+        remoteTest(dataBaseLen, items, true);
 
         // Auth test
         dataBaseLen = 1024;
@@ -102,21 +109,38 @@ public class ReplicateTest extends Test {
         remoteTest(dataBaseLen, items, "root", "abc", "Root", "abc");
     }
 
-    private void inprocTest(int dataBaseLen, int items) {
+    private void inprocTest(int dataBaseLen, int items, boolean testMasterDown) {
         File testDir = getDir();
         File masterDir = getDir(testDir, "master");
         File slaveDir = getDir(testDir, "slave");
         String url = "walog:inproc:slave:" + masterDir + "?dataDir=" + slaveDir;
 
-        slaveTest("inproc", dataBaseLen, items, url, null);
+        Runnable down = new Runnable() {
+            @Override
+            public void run() {
+                IoUtils.close(master);
+            }
+        };
+        Runnable reboot = new Runnable() {
+            @Override
+            public void run() {
+                master = slave.getMaster();
+            }
+        };
+        slaveTest("inproc", dataBaseLen, items, url, null, testMasterDown, down, reboot);
     }
 
-    private void remoteTest(int dataBaseLen, int items) {
-        remoteTest(dataBaseLen, items, null, null, null, null);
+    private void remoteTest(int dataBaseLen, int items, boolean testMasterDown) {
+        remoteTest(dataBaseLen, items, null, null, null, null, testMasterDown);
     }
 
     private void remoteTest(int dataBaseLen, int items, String user, String password,
                             String masterUser, String masterPassword) {
+        remoteTest(dataBaseLen, items, user, password, masterUser, masterPassword, false);
+    }
+
+    private void remoteTest(int dataBaseLen, int items, String user, String password,
+                            String masterUser, String masterPassword, boolean testMasterDown) {
         File testDir = getDir();
         File masterDir = getDir(testDir, "master");
         File slaveDir = getDir(testDir, "slave");
@@ -127,24 +151,49 @@ public class ReplicateTest extends Test {
             info.put("password", password);
         }
 
-        String[] args = {"-d", masterDir + ""};
+        final String[] args;
         if (masterUser != null && masterPassword != null) {
             args = new String[] {"-d", masterDir + "", "-u", masterUser, "-p", masterPassword};
         } else if (masterUser != null) {
             args = new String[] {"-d", masterDir + "", "-u", masterUser};
         } else if (masterPassword != null) {
             args = new String[] {"-d", masterDir + "", "-p", masterPassword};
+        } else {
+            args = new String[] {"-d", masterDir + ""};
         }
-        try (RmiWalServer server = RmiWalServer.start(args)) {
-            slaveTest("rmi", dataBaseLen, items, url, info);
+
+        try {
+            rmiServer = RmiWalServer.start(args);
+            Runnable down = new Runnable() {
+                @Override
+                public void run() {
+                    IoUtils.close(rmiServer);
+                }
+            };
+            Runnable reboot = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (!rmiServer.isOpen()) {
+                            rmiServer = RmiWalServer.start(args);
+                        }
+                    } catch (RemoteException | MalformedURLException e) {
+                        throw new NetWalException("start rmi server error", e);
+                    }
+                }
+            };
+            slaveTest("rmi", dataBaseLen, items, url, info, testMasterDown, down, reboot);
         } catch (WalException e) {
             throw e;
         } catch (Exception e) {
             throw new AssertionError(e);
+        } finally {
+            IoUtils.close(rmiServer);
         }
     }
 
-    private void slaveTest(String tag, int dataBaseLen, int items, String url, Properties info) {
+    private void slaveTest(String tag, int dataBaseLen, int items, String url, Properties info,
+                           boolean testMasterDown, final Runnable down, final Runnable reboot) {
         final String prefix;
         StringBuilder sb = new StringBuilder(dataBaseLen);
         for (int i = 0; i < dataBaseLen; ++i) {
@@ -163,17 +212,18 @@ public class ReplicateTest extends Test {
         Wal fromWal = null;
         while (caseIt < 2) {
             if (caseIt == 0) {
-                IoUtils.info("%s: replicate from the start wal: items %d, data min size %d",
-                        tag, items, dataBaseLen);
+                IoUtils.info("%s: replicate from the start wal: items %d, data min size %d, test master down %s",
+                        tag, items, dataBaseLen, testMasterDown);
             } else {
                 assert fromWal != null;
                 long lsn = fromWal.getLsn();
-                IoUtils.info("%s: replicate from the wal 0x%x: items %d, data min size %d",
-                        tag, lsn, case2Items, dataBaseLen);
+                IoUtils.info("%s: replicate from the wal 0x%x: items %d, data min size %d, test master down %s",
+                        tag, lsn, case2Items, dataBaseLen, testMasterDown);
             }
 
-            try (SlaveWaler slaveWaler = WalDriverManager.connect(url, info)) {
-                Waler masterWaler = slaveWaler.getMaster();
+            this.slave = WalDriverManager.connect(url, info);
+            try {
+                this.master = this.slave.getMaster();
                 final int n;
                 int i;
                 if (caseIt == 0) {
@@ -184,36 +234,64 @@ public class ReplicateTest extends Test {
                     i = items;
                 }
 
-                // Master writes
-                for (; i < n; ++i) {
-                    masterWaler.append(prefix + i);
+                IoUtils.info("%s: write into master", tag);
+                final boolean remote = "rmi".equals(tag);
+                boolean downed = false;
+                while (i < n) {
+                    if (testMasterDown && !downed && i % (remote? 1000: 100) == 0) {
+                        down.run();
+                        downed = true;
+                    }
+                    try {
+                        this.master.append(prefix + i);
+                        downed = false;
+                        ++i;
+                    } catch (WalException e) {
+                        if (!downed) throw e;
+                        reboot.run();
+                        this.master = this.slave.getMaster();
+                    }
                 }
 
-                // Slave reads
+                IoUtils.info("%s: read from slave and check", tag);
                 Wal wal;
                 if (caseIt == 0) {
                     i = 0;
-                    wal = slaveWaler.first(0);
+                    wal = this.slave.first(0);
                 } else {
                     i = items;
-                    wal = slaveWaler.next(fromWal, 0);
+                    wal = this.slave.next(fromWal, 0);
                 }
+                downed = false;
                 do {
                     String log  = prefix + i;
                     String data = new String(wal.getData(), Wal.CHARSET);
-                    asserts(log.equals(data), "Replicated wal not matched");
-                    if (++i >= n) {
+                    asserts(log.equals(data), "Replicated wal not matched: i = " +i);
+                    if (testMasterDown && !downed && i % (remote? 2000: 200) == 0) {
+                        down.run();
+                        downed = true;
+                    }
+                    if (!downed && i + 1 >= n) {
+                        reboot.run();
                         break;
                     }
-                    wal = slaveWaler.next(wal, 0);
+                    try {
+                        wal = this.slave.next(wal, 0);
+                        downed = false;
+                        ++i;
+                    } catch (WalException e) {
+                        if (!downed) throw e;
+                        reboot.run();
+                    }
                     fromWal = wal;
                 } while (true);
 
-                IoUtils.close(slaveWaler);
-                long diff = slaveWaler.bytesBehindMaster();
+                long diff = this.slave.bytesBehindMaster();
                 asserts(diff == 0L, "case-"+caseIt+": diff " + diff);
 
                 ++caseIt;
+            } finally {
+                IoUtils.close(this.slave);
             }
         }
     }

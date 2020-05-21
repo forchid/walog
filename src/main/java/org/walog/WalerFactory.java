@@ -68,6 +68,10 @@ public class WalerFactory {
         return waler;
     }
 
+    public static Waler open(String dir, AppendOptions options, int fetchSize, boolean fetchLast) throws WalException {
+        return open(new File(dir), options, fetchSize, fetchLast);
+    }
+
     public static Waler open(String dir, AppendOptions options, boolean fetchLast) throws WalException {
         return open(new File(dir), options, 0, fetchLast);
     }

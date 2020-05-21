@@ -80,7 +80,7 @@ public class RmiWalDriver extends AbstractWalDriver {
             failed = false;
             return cast(waler);
         } catch (NotBoundException | MalformedURLException | RemoteException e) {
-            throw new WalException("lookup remote waler error", e);
+            throw new NetWalException("lookup remote waler error", e);
         } finally {
             if (failed) {
                 IoUtils.close(wrapper);

@@ -47,7 +47,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.append(log);
         } catch (RemoteException e) {
-            throw new IOWalException("append failed", e);
+            throw new NetWalException("append failed", e);
         }
     }
 
@@ -56,7 +56,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.append(log, offset, length);
         } catch (RemoteException e) {
-            throw new IOWalException("append failed", e);
+            throw new NetWalException("append failed", e);
         }
     }
 
@@ -65,7 +65,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.append(log);
         } catch (RemoteException e) {
-            throw new IOWalException("append failed", e);
+            throw new NetWalException("append failed", e);
         }
     }
 
@@ -74,7 +74,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.first();
         } catch (RemoteException e) {
-            throw new IOWalException("fetch first wal failed", e);
+            throw new NetWalException("fetch first wal failed", e);
         }
     }
 
@@ -83,7 +83,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.first(timeout);
         } catch (RemoteException e) {
-            throw new IOWalException("fetch first wal failed", e);
+            throw new NetWalException("fetch first wal failed", e);
         }
     }
 
@@ -92,7 +92,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.get(lsn);
         } catch (RemoteException e) {
-            throw new IOWalException("fetch specified wal failed", e);
+            throw new NetWalException("fetch specified wal failed", e);
         }
     }
 
@@ -101,7 +101,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.next(wal);
         } catch (RemoteException e) {
-            throw new IOWalException("fetch next wal failed", e);
+            throw new NetWalException("fetch next wal failed", e);
         }
     }
 
@@ -110,7 +110,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.next(wal, timeout);
         } catch (RemoteException e) {
-            throw new IOWalException("fetch specified wal failed", e);
+            throw new NetWalException("fetch specified wal failed", e);
         }
     }
 
@@ -124,7 +124,7 @@ public class RmiWaler implements Waler {
             failed = false;
             return it;
         } catch (RemoteException e) {
-            throw new IOWalException("Create wal iterator failed", e);
+            throw new NetWalException("Create wal iterator failed", e);
         } finally {
             if (failed) {
                 IoUtils.close(wrapper);
@@ -142,7 +142,7 @@ public class RmiWaler implements Waler {
             failed = false;
             return it;
         } catch (RemoteException e) {
-            throw new IOWalException("Create wal iterator failed", e);
+            throw new NetWalException("Create wal iterator failed", e);
         } finally {
             if (failed) {
                 IoUtils.close(wrapper);
@@ -160,7 +160,7 @@ public class RmiWaler implements Waler {
             failed = false;
             return it;
         } catch (RemoteException e) {
-            throw new IOWalException("Create wal iterator failed", e);
+            throw new NetWalException("Create wal iterator failed", e);
         } finally {
             if (failed) {
                 IoUtils.close(wrapper);
@@ -173,7 +173,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.purgeTo(filename);
         } catch (RemoteException e) {
-            throw new IOWalException("purge to file failed", e);
+            throw new NetWalException("purge to file failed", e);
         }
     }
 
@@ -182,7 +182,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.purgeTo(fileLsn);
         } catch (RemoteException e) {
-            throw new IOWalException("purge to file failed", e);
+            throw new NetWalException("purge to file failed", e);
         }
     }
 
@@ -191,7 +191,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.clear();
         } catch (RemoteException e) {
-            throw new IOWalException("clear wal files failed", e);
+            throw new NetWalException("clear wal files failed", e);
         }
     }
 
@@ -200,7 +200,7 @@ public class RmiWaler implements Waler {
         try {
             this.wrapper.sync();
         } catch (RemoteException e) {
-            throw new IOWalException("sync failed", e);
+            throw new NetWalException("sync failed", e);
         }
     }
 
@@ -209,7 +209,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.last();
         } catch (RemoteException e) {
-            throw new IOWalException("fetch last wal failed", e);
+            throw new NetWalException("fetch last wal failed", e);
         }
     }
 
@@ -218,7 +218,7 @@ public class RmiWaler implements Waler {
         try {
             return this.wrapper.isOpen();
         } catch (RemoteException e) {
-            throw new IOWalException("check open state failed", e);
+            throw new NetWalException("check open state failed", e);
         }
     }
 
@@ -227,7 +227,7 @@ public class RmiWaler implements Waler {
         try {
             this.wrapper.close();
         } catch (RemoteException e) {
-            throw new IOWalException("close failed", e);
+            throw new NetWalException("close failed", e);
         }
     }
 

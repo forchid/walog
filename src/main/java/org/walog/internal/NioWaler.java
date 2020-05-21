@@ -431,26 +431,42 @@ public class NioWaler implements Waler {
         checkLsn(lsn);
         long fileLsn = WalFileUtils.fileLsn(lsn);
 
-        NioWalFile walFile = this.walCache.get(fileLsn);
-        if (walFile != null) {
-            return walFile;
-        }
-
-        synchronized (this.walCache) {
-            walFile = this.walCache.get(fileLsn);
+        try {
+            NioWalFile walFile = this.walCache.get(fileLsn);
             if (walFile != null) {
                 return walFile;
             }
-            String filename = WalFileUtils.filename(fileLsn);
-            File file = new File(this.dir, filename);
-            if (!file.isFile()) {
-                return null;
-            }
-            walFile = new NioWalFile(file);
-            this.walCache.put(fileLsn, walFile);
-        }
 
-        return walFile;
+            synchronized (this.walCache) {
+                walFile = this.walCache.get(fileLsn);
+                if (walFile != null) {
+                    return walFile;
+                }
+                String filename = WalFileUtils.filename(fileLsn);
+                File file = new File(this.dir, filename);
+                if (!file.isFile()) {
+                    return null;
+                }
+
+                NioWalFile tmp = new NioWalFile(file);
+                boolean failed = true;
+                try {
+                    this.walCache.put(fileLsn, tmp);
+                    ensureOpen();
+                    walFile = tmp;
+                    failed = false;
+                } finally {
+                    if (failed) {
+                        IoUtils.close(tmp);
+                    }
+                }
+            }
+
+            return walFile;
+        } catch (IllegalStateException e) {
+            ensureOpen();
+            throw e;
+        }
     }
 
     @Override
@@ -520,15 +536,10 @@ public class NioWaler implements Waler {
 
     @Override
     public void close() {
-        if (!isOpen()) {
-            return;
-        }
         this.open = false;
-
         IoUtils.close(this.walCache);
         synchronized (this.appenderInitLock) {
             IoUtils.close(this.appender);
-            this.appender = null;
         }
     }
 

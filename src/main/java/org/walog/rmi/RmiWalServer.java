@@ -24,6 +24,7 @@
 
 package org.walog.rmi;
 
+import org.walog.WalDriverManager;
 import org.walog.Waler;
 import org.walog.WalerFactory;
 import org.walog.util.IoUtils;
@@ -38,6 +39,8 @@ import java.util.Properties;
 import static java.lang.Integer.*;
 import static java.lang.System.*;
 
+/** A master/slave wal server based on rmi protocol.
+ */
 public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, AutoCloseable {
 
     static final String HOST = getProperty("org.walog.rmi.server.host", "localhost");
@@ -47,6 +50,10 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
     static final String USER = getProperty("org.walog.rmi.server.user");
     static final String PASSWORD = getProperty("org.walog.rmi.server.password");
     static final int FETCH_SIZE = getInteger("org.walog.rmi.server.fetchSize", 64);
+    // Master config
+    static final String MASTER_URL = getProperty("org.walog.rmi.server.master.url");
+    static final String MASTER_USER = getProperty("org.walog.rmi.server.master.user");
+    static final String MASTER_PASSWORD = getProperty("org.walog.rmi.server.master.password");
 
     public static void main(String[] args) throws Exception {
         start(args);
@@ -56,6 +63,7 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
             throws RemoteException, MalformedURLException {
         String host = HOST, dataDir = DIR, name = NAME, user = USER, password = PASSWORD;
         int port = PORT, fetchSize = FETCH_SIZE;
+        String masterURL = MASTER_URL, masterUser = MASTER_USER, masterPassword = MASTER_PASSWORD;
 
         for (int i = 0, n = args.length; i < n; ++i) {
             String arg = args[i];
@@ -73,10 +81,17 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
                 password = args[++i];
             } else if ("--fetch-size".equals(arg)) {
                 fetchSize = Integer.decode(args[++i]);
+            } else if ("--master-url".equals(arg)) {
+                masterURL = args[++i];
+            } else if ("--master-user".equals(arg)) {
+                masterUser = args[++i];
+            } else if ("--master-password".equals(arg)) {
+                masterPassword = args[++i];
             }
         }
 
-        RmiWalServer service = new RmiWalServer(dataDir, host, port, name, user, password, fetchSize);
+        RmiWalServer service = new RmiWalServer(dataDir, host, port, name, user, password, fetchSize,
+                masterURL, masterUser, masterPassword);
         boolean failed = true;
         try {
             port = service.port;
@@ -107,25 +122,35 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
     protected final String password;
     protected final int fetchSize;
 
+    protected final String masterURL;
+    protected final String masterUser;
+    protected final String masterPassword;
+
     protected Waler waler;
     protected String rmiURL;
     protected boolean bound;
 
     public RmiWalServer(String dataDir) throws RemoteException {
-        this(dataDir, HOST, PORT, NAME, USER, PASSWORD, FETCH_SIZE);
+        this(dataDir, HOST, PORT, NAME, USER, PASSWORD, FETCH_SIZE, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
     }
 
     public RmiWalServer(String dataDir, String host, int port) throws RemoteException {
-        this(dataDir, host, port, NAME, USER, PASSWORD, FETCH_SIZE);
+        this(dataDir, host, port, NAME, USER, PASSWORD, FETCH_SIZE, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
     }
 
     public RmiWalServer(String dataDir, String host, int port, String service,
                         String user, String password) throws RemoteException {
-        this(dataDir, host, port, service, user, password, FETCH_SIZE);
+        this(dataDir, host, port, service, user, password, FETCH_SIZE, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
     }
 
     public RmiWalServer(String dataDir, String host, int port, String service,
                         String user, String password, int fetchSize) throws RemoteException {
+        this(dataDir, host, port, service, user, password, fetchSize, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
+    }
+
+    public RmiWalServer(String dataDir, String host, int port, String service,
+                        String user, String password, int fetchSize,
+                        String masterURL, String masterUser, String masterPassword) throws RemoteException {
         this.host = host;
         this.port = port;
         this.name = service;
@@ -133,11 +158,25 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
         this.password = password;
         this.dataDir = dataDir;
         this.fetchSize = fetchSize;
-        this.waler = open(dataDir, fetchSize);
+        this.masterURL = masterURL;
+        this.masterUser = masterUser;
+        this.masterPassword = masterPassword;
+        this.waler = open(dataDir, fetchSize, masterURL, masterUser, masterPassword);
     }
 
-    static Waler open(String dataDir, int fetchSize) {
-        return WalerFactory.open(dataDir, fetchSize, true);
+    static Waler open(String dataDir, int fetchSize,
+                      String masterURL, String masterUser, String masterPassword) {
+        if (masterURL == null) {
+            return WalerFactory.open(dataDir, fetchSize, true);
+        } else {
+            Properties info = new Properties();
+            info.put("dataDir", dataDir);
+            info.put("fetchSize", fetchSize + "");
+            info.put("fetchLast", true + "");
+            if (masterUser != null) info.put("user", masterUser);
+            if (masterPassword != null) info.put("password", masterPassword);
+            return WalDriverManager.connect(masterURL, info);
+        }
     }
 
     @Override
@@ -160,6 +199,10 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
         }
 
         return new WalerWrapper(this.waler);
+    }
+
+    public boolean isOpen() {
+        return this.waler.isOpen();
     }
 
     @Override

@@ -37,12 +37,12 @@ public class WalerWrapper extends UnicastRemoteObject implements RmiWrapper {
 
     public WalerWrapper(Waler waler) throws RemoteException {
         this.waler = waler;
-        this.open = true;
+        open();
     }
 
     @Override
     public void open() throws WalException, RemoteException {
-        ensureOpen();
+        this.open = true;
     }
 
     @Override
@@ -185,7 +185,7 @@ public class WalerWrapper extends UnicastRemoteObject implements RmiWrapper {
 
     @Override
     public boolean isOpen() throws RemoteException {
-        return this.open;
+        return this.open && this.waler.isOpen();
     }
 
     @Override
@@ -193,9 +193,9 @@ public class WalerWrapper extends UnicastRemoteObject implements RmiWrapper {
         this.open = false;
     }
 
-    protected void ensureOpen() throws IOWalException, RemoteException {
+    protected void ensureOpen() throws WalException, RemoteException {
         if (!isOpen()) {
-            throw new IOWalException("Remote waler closed");
+            throw new NetWalException("Remote waler closed");
         }
     }
 
