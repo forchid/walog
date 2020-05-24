@@ -24,12 +24,9 @@
 
 package org.walog;
 
-import org.walog.rmi.RmiWalServer;
 import org.walog.util.IoUtils;
 
 import java.io.File;
-import java.net.MalformedURLException;
-import java.rmi.RemoteException;
 import java.util.Properties;
 
 public class ReplicateTest extends Test {
@@ -39,12 +36,19 @@ public class ReplicateTest extends Test {
         completed = true;
     }
 
-    RmiWalServer rmiServer;
+    WalServer walServer;
     SlaveWaler slave;
     Waler master;
 
     public ReplicateTest(int iterate) {
         super(iterate);
+    }
+
+    @Override
+    protected void cleanup() {
+        IoUtils.close(this.slave);
+        IoUtils.close(this.walServer);
+        super.cleanup();
     }
 
     @Override
@@ -153,32 +157,28 @@ public class ReplicateTest extends Test {
 
         final String[] args;
         if (masterUser != null && masterPassword != null) {
-            args = new String[] {"-d", masterDir + "", "-u", masterUser, "-p", masterPassword};
+            args = new String[] {"--proto", "rmi", "-d", masterDir + "", "-u", masterUser, "-p", masterPassword};
         } else if (masterUser != null) {
-            args = new String[] {"-d", masterDir + "", "-u", masterUser};
+            args = new String[] {"--proto", "rmi", "-d", masterDir + "", "-u", masterUser};
         } else if (masterPassword != null) {
-            args = new String[] {"-d", masterDir + "", "-p", masterPassword};
+            args = new String[] {"--proto", "rmi", "-d", masterDir + "", "-p", masterPassword};
         } else {
-            args = new String[] {"-d", masterDir + ""};
+            args = new String[] {"--proto", "rmi", "-d", masterDir + ""};
         }
 
         try {
-            rmiServer = RmiWalServer.start(args);
+            walServer = WalServer.boot(args);
             Runnable down = new Runnable() {
                 @Override
                 public void run() {
-                    IoUtils.close(rmiServer);
+                    IoUtils.close(walServer);
                 }
             };
             Runnable reboot = new Runnable() {
                 @Override
                 public void run() {
-                    try {
-                        if (!rmiServer.isOpen()) {
-                            rmiServer = RmiWalServer.start(args);
-                        }
-                    } catch (RemoteException | MalformedURLException e) {
-                        throw new NetWalException("start rmi server error", e);
+                    if (!walServer.isOpen()) {
+                        walServer = WalServer.boot(args);
                     }
                 }
             };
@@ -188,7 +188,7 @@ public class ReplicateTest extends Test {
         } catch (Exception e) {
             throw new AssertionError(e);
         } finally {
-            IoUtils.close(rmiServer);
+            IoUtils.close(walServer);
         }
     }
 
@@ -276,9 +276,11 @@ public class ReplicateTest extends Test {
                         break;
                     }
                     try {
-                        wal = this.slave.next(wal, 0);
+                        wal = this.slave.next(wal, 10000);
                         downed = false;
                         ++i;
+                    } catch (TimeoutWalException e) {
+                        throw new AssertionError("caseIt."+caseIt+" i = " + i, e);
                     } catch (WalException e) {
                         if (!downed) throw e;
                         reboot.run();

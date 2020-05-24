@@ -61,9 +61,10 @@ public class AllTest extends Test {
     protected void prepare() {
         final int i = this.iterate;
 
-        add(new IterateOnAppendTest(i))
-        .add(new ReplicateTest(i))
-        .add(new WalerFactoryTest(i));
+        add(new CrashTest(i));
+        add(new IterateOnAppendTest(i));
+        add(new ReplicateTest(i));
+        add(new WalerFactoryTest(i));
     }
 
     @Override

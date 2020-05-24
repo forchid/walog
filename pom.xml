@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.walog</groupId>
   <artifactId>walog</artifactId>
-  <version>0.1.2</version>
+  <version>0.2.0</version>
   <name>walog</name>
   <description>A simple WAL implementation</description>
   <url>https://github.com/little-pan/walog</url>

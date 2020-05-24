@@ -44,8 +44,6 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import static java.util.concurrent.TimeUnit.*;
 
-import static java.lang.Integer.getInteger;
-
 /** The appender that actually execute wal "append" operation
  * for concurrency control.
  *
@@ -625,7 +623,7 @@ class NioAppender extends Thread implements AutoCloseable {
     }
 
     protected static int getAsyncMode() {
-        return getInteger("org.walog.append.asyncMode", 1);
+        return AppendOptions.ASYNC_MODE;
     }
 
 }
