@@ -24,10 +24,7 @@
 
 package org.walog.rmi;
 
-import org.walog.WalDriverManager;
-import org.walog.Waler;
-import org.walog.WalerFactory;
-import org.walog.util.IoUtils;
+import org.walog.*;
 
 import java.net.MalformedURLException;
 import java.rmi.Naming;
@@ -41,146 +38,91 @@ import static java.lang.System.*;
 
 /** A master/slave wal server based on rmi protocol.
  */
-public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, AutoCloseable {
+public class RmiWalServer extends WalServer implements RmiWalService {
 
-    static final String HOST = getProperty("org.walog.rmi.server.host", "localhost");
-    static final int PORT = getInteger("org.walog.rmi.server.port", 1099);
-    static final String DIR  = getProperty("org.walog.rmi.server.dataDir", "data");
-    static final String NAME = getProperty("org.walog.rmi.server.service", "wal");
-    static final String USER = getProperty("org.walog.rmi.server.user");
-    static final String PASSWORD = getProperty("org.walog.rmi.server.password");
-    static final int FETCH_SIZE = getInteger("org.walog.rmi.server.fetchSize", 64);
+    static final String PROP_PREFIX = "org.walog.rmi.server";
+
+    static final String HOST = getProperty(PROP_PREFIX+".host", WalServer.HOST);
+    static final int PORT = getInteger(PROP_PREFIX+".port", WalServer.PORT);
+    static final String DIR  = getProperty(PROP_PREFIX+".dataDir", WalServer.DIR);
+    static final String NAME = getProperty(PROP_PREFIX+".service", "wal");
+    static final String USER = getProperty(PROP_PREFIX+".user", WalServer.USER);
+    static final String PASSWORD = getProperty(PROP_PREFIX+".password", WalServer.PASSWORD);
+    static final int FETCH_SIZE = getInteger(PROP_PREFIX+".fetchSize", WalServer.FETCH_SIZE);
     // Master config
-    static final String MASTER_URL = getProperty("org.walog.rmi.server.master.url");
-    static final String MASTER_USER = getProperty("org.walog.rmi.server.master.user");
-    static final String MASTER_PASSWORD = getProperty("org.walog.rmi.server.master.password");
+    static final String MASTER_URL = getProperty(PROP_PREFIX+".master.url", WalServer.MASTER_URL);
+    static final String MASTER_USER = getProperty(PROP_PREFIX+".master.user", WalServer.MASTER_USER);
+    static final String MASTER_PASSWORD = getProperty(PROP_PREFIX+".master.password", WalServer.MASTER_PASSWORD);
 
-    public static void main(String[] args) throws Exception {
-        start(args);
+    public static void main(String[] args) {
+        new RmiWalServer().start(args);
     }
 
-    public static RmiWalServer start(String[] args)
-            throws RemoteException, MalformedURLException {
-        String host = HOST, dataDir = DIR, name = NAME, user = USER, password = PASSWORD;
-        int port = PORT, fetchSize = FETCH_SIZE;
-        String masterURL = MASTER_URL, masterUser = MASTER_USER, masterPassword = MASTER_PASSWORD;
-
-        for (int i = 0, n = args.length; i < n; ++i) {
-            String arg = args[i];
-            if ("-h".equals(arg) || "--host".equals(arg)) {
-                host = args[++i];
-            } else if ("-P".equals(arg) || "--port".equals(arg)) {
-                port = Integer.decode(args[++i]);
-            } else if ("-d".equals(arg) || "--data-dir".equals(arg)) {
-                dataDir = args[++i];
-            } else if ("-s".equals(arg) || "--service".equals(arg)) {
-                name = args[++i];
-            } else if ("-u".equals(arg) || "--user".equals(arg)) {
-                user = args[++i];
-            } else if ("-p".equals(arg) || "--password".equals(arg)) {
-                password = args[++i];
-            } else if ("--fetch-size".equals(arg)) {
-                fetchSize = Integer.decode(args[++i]);
-            } else if ("--master-url".equals(arg)) {
-                masterURL = args[++i];
-            } else if ("--master-user".equals(arg)) {
-                masterUser = args[++i];
-            } else if ("--master-password".equals(arg)) {
-                masterPassword = args[++i];
-            }
-        }
-
-        RmiWalServer service = new RmiWalServer(dataDir, host, port, name, user, password, fetchSize,
-                masterURL, masterUser, masterPassword);
-        boolean failed = true;
-        try {
-            port = service.port;
-            try {
-
-                LocateRegistry.createRegistry(port);
-            } catch (RemoteException e) {
-                // Ignore
-            }
-
-            service.rmiURL = String.format("rmi://%s:%d/%s", service.host, port, service.name);
-            Naming.rebind(service.rmiURL, service);
-            service.bound = true;
-            failed = false;
-            return service;
-        } finally {
-            if(failed) {
-                IoUtils.close(service);
-            }
-        }
-    }
-
-    protected final String host;
-    protected final int port;
-    protected final String dataDir;
-    protected final String name;
-    protected final String user;
-    protected final String password;
-    protected final int fetchSize;
-
-    protected final String masterURL;
-    protected final String masterUser;
-    protected final String masterPassword;
-
-    protected Waler waler;
     protected String rmiURL;
     protected boolean bound;
 
-    public RmiWalServer(String dataDir) throws RemoteException {
+    public RmiWalServer() {
+        this(DIR);
+    }
+
+    public RmiWalServer(String dataDir) {
         this(dataDir, HOST, PORT, NAME, USER, PASSWORD, FETCH_SIZE, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
     }
 
-    public RmiWalServer(String dataDir, String host, int port) throws RemoteException {
+    public RmiWalServer(String dataDir, String host, int port) {
         this(dataDir, host, port, NAME, USER, PASSWORD, FETCH_SIZE, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
     }
 
     public RmiWalServer(String dataDir, String host, int port, String service,
-                        String user, String password) throws RemoteException {
+                        String user, String password) {
         this(dataDir, host, port, service, user, password, FETCH_SIZE, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
     }
 
     public RmiWalServer(String dataDir, String host, int port, String service,
-                        String user, String password, int fetchSize) throws RemoteException {
+                        String user, String password, int fetchSize) {
         this(dataDir, host, port, service, user, password, fetchSize, MASTER_URL, MASTER_USER, MASTER_PASSWORD);
     }
 
     public RmiWalServer(String dataDir, String host, int port, String service,
                         String user, String password, int fetchSize,
-                        String masterURL, String masterUser, String masterPassword) throws RemoteException {
-        this.host = host;
-        this.port = port;
-        this.name = service;
-        this.user = user;
-        this.password = password;
-        this.dataDir = dataDir;
-        this.fetchSize = fetchSize;
-        this.masterURL = masterURL;
-        this.masterUser = masterUser;
-        this.masterPassword = masterPassword;
-        this.waler = open(dataDir, fetchSize, masterURL, masterUser, masterPassword);
+                        String masterURL, String masterUser, String masterPassword) {
+        super(dataDir, host, port, service, user, password, fetchSize, masterURL, masterUser, masterPassword);
     }
 
-    static Waler open(String dataDir, int fetchSize,
-                      String masterURL, String masterUser, String masterPassword) {
-        if (masterURL == null) {
-            return WalerFactory.open(dataDir, fetchSize, true);
-        } else {
-            Properties info = new Properties();
-            info.put("dataDir", dataDir);
-            info.put("fetchSize", fetchSize + "");
-            info.put("fetchLast", true + "");
-            if (masterUser != null) info.put("user", masterUser);
-            if (masterPassword != null) info.put("password", masterPassword);
-            return WalDriverManager.connect(masterURL, info);
+    @Override
+    public RmiWalServer start(String[] args) {
+        super.start(args);
+
+        boolean failed = true;
+        try {
+            int port = this.port;
+            try {
+                LocateRegistry.createRegistry(port);
+            } catch (RemoteException e) {
+                // Ignore
+            }
+
+            UnicastRemoteObject.exportObject(this, 0);
+            this.rmiURL = String.format("rmi://%s:%d/%s", this.host, port, this.name);
+            Naming.rebind(this.rmiURL, this);
+            this.bound = true;
+            failed = false;
+            return this;
+        } catch (RemoteException | MalformedURLException e) {
+            throw new NetWalException("Start rmi wal server failed", e);
+        } finally {
+            if (failed) {
+                close();
+            }
         }
     }
 
     @Override
     public RmiWrapper connect(Properties info) throws RemoteException {
+        if (!isOpen()) {
+            throw new RemoteException("Wal rmi server not opened");
+        }
+
         if (this.user != null || this.password != null) {
             if (info == null) {
                 // 0) Auth failed
@@ -201,13 +143,10 @@ public class RmiWalServer extends UnicastRemoteObject implements RmiWalService, 
         return new WalerWrapper(this.waler);
     }
 
-    public boolean isOpen() {
-        return this.waler.isOpen();
-    }
-
     @Override
     public void close() {
-        IoUtils.close(this.waler);
+        super.close();
+
         if (this.bound) {
             try {
                 Naming.unbind(this.rmiURL);

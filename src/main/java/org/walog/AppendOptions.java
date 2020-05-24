@@ -34,9 +34,10 @@ public class AppendOptions {
     public static int AUTO_FLUSH     = getInteger("org.walog.append.autoFlush", 1);
     public static int FLUSH_PERIOD   = getInteger("org.walog.append.flushPeriod", 100);
     public static int FLUSH_UNLOCK   = getInteger("org.walog.append.flushUnlock", 1);
+    public static int ASYNC_MODE     = getInteger("org.walog.append.asyncMode", 1);
 
     private boolean flushUnlock = FLUSH_UNLOCK == 1;
-    private int asyncMode = 1;
+    private int asyncMode = ASYNC_MODE;
     private int queueSize = QUEUE_SIZE;
     private int batchSize = BATCH_SIZE;
 
