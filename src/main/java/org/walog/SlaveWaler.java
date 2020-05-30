@@ -29,14 +29,19 @@ import org.walog.util.IoUtils;
 
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicLong;
+import static java.lang.Integer.*;
 
 public class SlaveWaler implements Waler {
 
-    public static final int STATE_INIT = 0;
-    public static final int STATE_WAIT = 1;
-    public static final int STATE_APPENDING = 2;
-    public static final int STATE_FAILED = 4;
-    public static final int STATE_CLOSED = 8;
+    static final int WAIT_TIMEOUT = getInteger("org.walog.slave.waitTimeout", 1000);
+    static final int RECON_PERIOD = getInteger("org.walog.slave.reconnectPeriod", 100);
+
+    public static final int STATE_INIT = 0x00;
+    public static final int STATE_WAIT = 0x01;
+    public static final int STATE_APPENDING = 0x02;
+    public static final int STATE_FAILED    = 0x04;
+    public static final int STATE_CLOSED    = 0x08;
+    public static final int STATE_CONNECT   = 0x10;
 
     protected volatile Waler waler;
     protected final String dataDir;
@@ -60,35 +65,6 @@ public class SlaveWaler implements Waler {
 
     public Waler getMaster() {
         return this.master;
-    }
-
-    protected Waler reopenMaster(long retryTimeout) throws WalException {
-        if (retryTimeout <= 0L) {
-            retryTimeout = 100L;
-        }
-
-        while (isOpen()) {
-            final Waler master;
-            try {
-                master = WalDriverManager.connect(this.masterURL, this.masterInfo);
-                if (master == null) {
-                    String s = "No wal driver found for master url: " + this.masterURL;
-                    throw new WalException(s);
-                }
-                return (this.master = master);
-            } catch (WalException e) {
-                if (!(e instanceof NetWalException)) {
-                    throw e;
-                }
-                try {
-                    Thread.sleep(retryTimeout);
-                } catch (InterruptedException ie) {
-                    throw new InterruptedWalException(ie);
-                }
-            }
-        }
-
-        throw new WalException("Slave waler closed");
     }
 
     public int getState() {
@@ -285,7 +261,7 @@ public class SlaveWaler implements Waler {
 
             slave.state = STATE_WAIT;
             WalIterator it = null;
-            long timeout = 1000;
+            long timeout = WAIT_TIMEOUT;
             boolean failed = true;
             try {
                 while (true) {
@@ -294,16 +270,18 @@ public class SlaveWaler implements Waler {
                         Wal fromWal = this.curr;
                         while (slave.isOpen()) {
                             try {
-                                if (fromWal != null) {
-                                    it = master.iterator(fromWal.getLsn(), timeout);
+                                if (fromWal == null) {
+                                    fromWal = master.first(timeout);
+                                } else {
+                                    long lsn = fromWal.getLsn();
+                                    it = master.iterator(lsn, timeout);
+                                    this.last = master.last();
                                     break;
                                 }
-                                fromWal = master.first(timeout);
                             } catch (TimeoutWalException e) {
-                                // Ignore
+                                tryLog(e);
                             }
                         }
-                        this.last = master.last();
 
                         while (slave.isOpen()) {
                             slave.state = STATE_WAIT;
@@ -337,7 +315,7 @@ public class SlaveWaler implements Waler {
                                 }
                                 trySync(waler);
                             } catch (TimeoutWalException e) {
-                                // Continue if timeout
+                                tryLog(e);
                             }
                         }
                         slave.state = STATE_CLOSED;
@@ -355,7 +333,8 @@ public class SlaveWaler implements Waler {
                             }
                             slave.state = STATE_FAILED;
                             IoUtils.close(master);
-                            master = slave.reopenMaster(timeout);
+                            slave.state = STATE_CONNECT;
+                            master = reconnect();
                         } else {
                             slave.state = STATE_CLOSED;
                             failed = false;
@@ -372,6 +351,47 @@ public class SlaveWaler implements Waler {
                     slave.state = STATE_FAILED;
                 }
                 IoUtils.close(it);
+            }
+        }
+
+        Waler reconnect() throws WalException {
+            long reconPeriod = RECON_PERIOD;
+            SlaveWaler slave = this.slave;
+
+            while (slave.isOpen()) {
+                final Waler master;
+                try {
+                    master = WalDriverManager.connect(slave.masterURL, slave.masterInfo);
+                    if (master == null) {
+                        String s = "No wal driver found for master url: " + slave.masterURL;
+                        throw new WalException(s);
+                    }
+                    return (slave.master = master);
+                } catch (WalException e) {
+                    if (!(e instanceof NetWalException)) {
+                        throw e;
+                    }
+                    try {
+                        if (reconPeriod >= 0) {
+                            Thread.sleep(reconPeriod);
+                        }
+                    } catch (InterruptedException ie) {
+                        throw new InterruptedWalException(ie);
+                    }
+                }
+            }
+
+            throw new WalException("Slave waler closed");
+        }
+
+        void tryLog(TimeoutWalException e) {
+            long diff = bytesBehindMaster();
+            if (diff != -1 && diff != 0) {
+                String s = "replicate timeout: lsn diff " + diff;
+                if (STATE_WAIT == this.slave.getState()) {
+                   s  = "wait timeout: lsn diff " + diff;
+                }
+                IoUtils.error(s, e);
             }
         }
 

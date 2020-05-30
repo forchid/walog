@@ -31,6 +31,7 @@ import org.walog.util.Task;
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.Callable;
+import static java.lang.Integer.*;
 
 /**
  * @author little-pan
@@ -39,12 +40,12 @@ import java.util.concurrent.Callable;
  */
 public abstract class Test {
     
-    protected final static File baseDir = new File(System.getProperty("user.dir"));
-    protected final static File testDir = new File(baseDir, "temp");
-    protected static final int iterates = Integer.getInteger("org.walog.test.iterates", 2);
+    protected static final File baseDir = new File(System.getProperty("user.dir"));
+    protected static final File testDir = new File(baseDir, "temp");
+    protected static final int iterates = getInteger("org.walog.test.iterates", 2);
 
-    protected static boolean completed = false;
-    private static boolean failed = false;
+    protected static volatile boolean completed = false;
+    private static volatile boolean failed = false;
     static {
         Thread monitor = new Thread(new Runnable() {
             @Override

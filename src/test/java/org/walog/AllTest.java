@@ -34,8 +34,9 @@ public class AllTest extends Test {
     protected final List<Test> tests = new ArrayList<>();
 
     public static void main(String[] args) {
-        for (int i = 0; i < iterates; ++i)
+        for (int i = 0; i < iterates; ++i) {
             new AllTest(i).test();
+        }
         completed = true;
     }
 

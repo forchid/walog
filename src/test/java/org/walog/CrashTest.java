@@ -35,7 +35,10 @@ import java.util.Random;
 public class CrashTest extends Test {
 
     public static void main(String[] args) {
-        new CrashTest(iterates).test();
+        for (int i = 0; i < iterates; ++i) {
+            new CrashTest(i).test();
+        }
+        completed = true;
     }
 
     protected CrashTest(int iterate) {

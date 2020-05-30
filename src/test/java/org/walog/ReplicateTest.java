@@ -32,7 +32,9 @@ import java.util.Properties;
 public class ReplicateTest extends Test {
 
     public static void main(String[] args) {
-        new ReplicateTest(iterates).test();
+        for (int i = 0; i < iterates; ++i) {
+            new ReplicateTest(i).test();
+        }
         completed = true;
     }
 
@@ -267,7 +269,7 @@ public class ReplicateTest extends Test {
                     String log  = prefix + i;
                     String data = new String(wal.getData(), Wal.CHARSET);
                     asserts(log.equals(data), "Replicated wal not matched: i = " +i);
-                    if (testMasterDown && !downed && i % (remote? 2000: 200) == 0) {
+                    if (testMasterDown && i % (remote? 2000: 200) == 0) {
                         down.run();
                         downed = true;
                     }
@@ -275,15 +277,23 @@ public class ReplicateTest extends Test {
                         reboot.run();
                         break;
                     }
+                    if (downed) {
+                        reboot.run();
+                        downed = false;
+                    }
                     try {
                         wal = this.slave.next(wal, 10000);
-                        downed = false;
                         ++i;
                     } catch (TimeoutWalException e) {
-                        throw new AssertionError("caseIt."+caseIt+" i = " + i, e);
-                    } catch (WalException e) {
-                        if (!downed) throw e;
-                        reboot.run();
+                        wal = this.slave.next(wal);
+                        if (wal == null) {
+                            String s = "caseIt."+caseIt+" i = " + i + ", slave state " + this.slave.getState();
+                            throw new AssertionError(s, e);
+                        } else {
+                            ++i;
+                            // fs watch issue?
+                            IoUtils.error("Wal exists but fetch timeout...", e);
+                        }
                     }
                     fromWal = wal;
                 } while (true);

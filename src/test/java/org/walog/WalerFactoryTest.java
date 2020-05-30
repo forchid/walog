@@ -40,7 +40,10 @@ import java.util.concurrent.Callable;
 public class WalerFactoryTest extends Test {
 
     public static void main(String[] args) {
-        new WalerFactoryTest(0).test();
+        for (int i = 0; i < iterates; ++i) {
+            new WalerFactoryTest(i).test();
+        }
+        completed = true;
     }
 
     public WalerFactoryTest(int iterate) {

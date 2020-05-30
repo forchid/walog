@@ -37,8 +37,10 @@ import java.util.concurrent.Callable;
 public class IterateOnAppendTest extends Test {
 
     public static void main(String[] args) {
-        for (int i = 0; i < iterates * 10; ++i)
+        for (int i = 0; i < iterates; ++i) {
             new IterateOnAppendTest(i).test();
+        }
+        completed = true;
     }
 
     public IterateOnAppendTest(int iterate) {
