@@ -70,7 +70,7 @@ public class CrashTest extends Test {
                 child.setWorkDir(curDir);
                 final String target = curDir+File.separator+"target";
                 child.setProperties(new String[]{"-classpath",
-                        target+File.separator+"classes:"+target+File.separator+"test-classes",
+                        target+File.separator+"classes" + File.pathSeparator + target+File.separator+"test-classes",
                         "-Dorg.walog.append.asyncMode=1",
                         //"-Dorg.walog.debug=true"
                 });
@@ -90,7 +90,7 @@ public class CrashTest extends Test {
                 child = newProc(mainClass, procArgs);
                 child.setWorkDir(curDir);
                 child.setProperties(new String[]{"-classpath",
-                        target+File.separator+"classes:"+target+File.separator+"test-classes",
+                        target+File.separator+"classes" + File.pathSeparator + target+File.separator+"test-classes",
                         "-Dorg.walog.append.asyncMode=1",
                         //"-Dorg.walog.debug=true"
                 });

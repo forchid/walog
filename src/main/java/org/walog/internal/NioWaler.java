@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import org.walog.*;
 import org.walog.util.IoUtils;
 import org.walog.util.LruCache;
+import org.walog.util.SysUtils;
 import org.walog.util.WalFileUtils;
 
 /**
@@ -225,6 +226,13 @@ public class NioWaler implements Waler {
 
     protected static WatchKey watchPoll(WatchService watchService, long timeout)
             throws InterruptedException {
+        if (SysUtils.WINDOWS && (timeout == 0L || timeout > 100L)) {
+            // A workaround of polling:
+            // sometimes watching not notified, file watch service issue on windows platform?
+            timeout = 100L;
+            return watchService.poll(timeout, TimeUnit.MILLISECONDS);
+        }
+
         if (timeout == 0L) {
             return watchService.take();
         } else {

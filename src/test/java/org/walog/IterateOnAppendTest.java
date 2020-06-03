@@ -228,7 +228,7 @@ public class IterateOnAppendTest extends Test {
         iterator.setWorkDir(curDir);
         final String target = curDir+File.separator+"target";
         iterator.setProperties(new String[]{"-classpath",
-                target+File.separator+"classes:"+target+File.separator+"test-classes",
+                target+File.separator+"classes" + File.pathSeparator + target+File.separator+"test-classes",
                 //"-Dorg.walog.debug=true"
         });
 
