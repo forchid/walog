@@ -537,6 +537,10 @@ public class NioWaler implements Waler {
         }
     }
 
+    void clearWalCache() {
+        this.walCache.clear();
+    }
+
     @Override
     public boolean isOpen() {
         return this.open;

@@ -73,15 +73,20 @@ public abstract class Test {
     }
     
     public void test() {
-        boolean failed = true;
+        boolean failed  = true;
+        Throwable cause = null;
         try {
             prepare();
             doTest();
             failed = false;
         } catch (IOException e) {
-            throw new RuntimeException(getName()+" failed", e);
+            RuntimeException ex = new RuntimeException(getName()+" failed", e);
+            cause = ex;
+            throw ex;
+        } catch (Throwable e) {
+            cause = e;
         } finally {
-            cleanup();
+            cleanup(cause);
             if (failed) {
                 Test.failed = true;
             }
@@ -96,8 +101,27 @@ public abstract class Test {
     protected abstract void doTest() throws IOException;
 
     protected void cleanup() {
-        deleteDir(getName());
-        setAsyncMode(true);
+        cleanup(null);
+    }
+
+    protected void cleanup(Throwable cause) {
+        try {
+            deleteDir(getName());
+            setAsyncMode(true);
+        } catch (final Throwable e) {
+            if (cause == null) {
+                cause = e;
+            } else {
+                IoUtils.error("cleanup failed", e);
+            }
+        }
+        if (cause instanceof RuntimeException) {
+            throw (RuntimeException)cause;
+        } else if (cause instanceof Error) {
+            throw (Error)cause;
+        } else if (cause != null) {
+            throw new AssertionError(cause);
+        }
     }
 
     protected File getDir() {

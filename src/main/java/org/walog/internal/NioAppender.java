@@ -350,26 +350,28 @@ class NioAppender extends Thread implements AutoCloseable {
         checkFileLock();
 
         // Prepare
-        // - Close old append file
         long nextFileLsn = nextFileLsn(this.appendFile.lsn);
         String nextFilename = filename(nextFileLsn);
         File nextFile = this.waler.newFile(nextFilename);
+        // - Close wal cache and old append file
+        this.waler.clearWalCache();
         IoUtils.close(this.appendFile);
 
-        // - Create a new append file
+        // - Remove all previous files(include old append file)
         File dir = this.waler.getDirectory();
         File[] files = listFiles(dir, true);
-        this.appendFile = new NioWalFile(nextFile);
-
-        // Remove all previous files(include old append file)
         for (File file: files) {
             IoUtils.debug("Delete wal file '%s'", file);
             if (file.exists() && !file.delete()) {
-                IoUtils.debug("Can't delete wal file '%s'", file);
+                IoUtils.info("Can't delete wal file '%s'", file);
                 item.setResult(Boolean.FALSE);
                 return;
             }
         }
+
+        // - Create a new append file
+        this.appendFile = new NioWalFile(nextFile);
+
         item.setResult(Boolean.TRUE);
     }
 
