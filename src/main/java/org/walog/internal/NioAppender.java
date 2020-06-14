@@ -350,17 +350,27 @@ class NioAppender extends Thread implements AutoCloseable {
         checkFileLock();
 
         // Prepare
-        long nextFileLsn = nextFileLsn(this.appendFile.lsn);
-        String nextFilename = filename(nextFileLsn);
-        File nextFile = this.waler.newFile(nextFilename);
-        // - Close wal cache and old append file
-        this.waler.clearWalCache();
-        IoUtils.close(this.appendFile);
+        if (this.appendFile.size() != 0L) {
+            long nextFileLsn = nextFileLsn(this.appendFile.lsn);
+            String nextFilename = filename(nextFileLsn);
+            File nextFile = this.waler.newFile(nextFilename);
+            // - Close old append file
+            IoUtils.close(this.appendFile);
+            // - Create a new append file
+            // Note: Creating new append file must be before doing clear, otherwise it's
+            // possible that no append file existing after clearing if crash!
+            this.appendFile = new NioWalFile(nextFile);
+        }
+        // - Clear wal cache
+        this.waler.clearCache();
 
-        // - Remove all previous files(include old append file)
+        // - Remove all previous files(include old append file if size > 0)
         File dir = this.waler.getDirectory();
         File[] files = listFiles(dir, true);
-        for (File file: files) {
+        int i = 0;
+        int n = files.length - 1/* 1: keep the new active append file */;
+        while (i < n) {
+            File file = files[i++];
             IoUtils.debug("Delete wal file '%s'", file);
             if (file.exists() && !file.delete()) {
                 IoUtils.info("Can't delete wal file '%s'", file);
@@ -368,9 +378,6 @@ class NioAppender extends Thread implements AutoCloseable {
                 return;
             }
         }
-
-        // - Create a new append file
-        this.appendFile = new NioWalFile(nextFile);
 
         item.setResult(Boolean.TRUE);
     }

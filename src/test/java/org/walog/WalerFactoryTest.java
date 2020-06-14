@@ -230,6 +230,7 @@ public class WalerFactoryTest extends Test {
         }
         asserts(walerb.purgeTo(last.getLsn()));
         asserts(walerb.clear());
+        asserts(walerb.first() == null);
 
         walerb.close();
         if (oldCacheSize != null) {

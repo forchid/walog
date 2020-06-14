@@ -537,7 +537,7 @@ public class NioWaler implements Waler {
         }
     }
 
-    void clearWalCache() {
+    void clearCache() {
         this.walCache.clear();
     }
 
